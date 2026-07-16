@@ -1,0 +1,1 @@
+Offline Android keyboard with QWERTY typing and on-device speech dictation

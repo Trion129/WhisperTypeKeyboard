@@ -85,6 +85,12 @@ app/src/main/jniLibs/
 - On-device ASR runtime: [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0)
 - Models downloaded at runtime from the sherpa-onnx `asr-models` release
 
+## F-Droid
+
+Packaging notes and submission steps: [`docs/FDROID.md`](docs/FDROID.md)
+
+Draft fdroiddata recipe: [`metadata/me.trion.whispertype.yml`](metadata/me.trion.whispertype.yml)
+
 ## Releases (CI)
 
 GitHub Actions builds signed APK + AAB and publishes a GitHub Release **when you run it**.

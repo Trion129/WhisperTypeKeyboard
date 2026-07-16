@@ -1,0 +1,56 @@
+# Draft F-Droid metadata for fdroiddata merge request.
+# Copy to: https://gitlab.com/fdroid/fdroiddata/-/tree/master/metadata/me.trion.whispertype.yml
+#
+# Before opening the MR:
+# 1. Tag a release commit (e.g. v1.1.0) on GitHub
+# 2. Replace Builds.commit with that tag's full git SHA
+# 3. Open MR against fdroiddata (or file RFP: https://gitlab.com/fdroid/rfp/-/issues)
+
+Categories:
+  - System
+  - Writing
+
+License: MIT
+
+AuthorName: Trion129
+
+WebSite: https://github.com/Trion129/WhisperTypeKeyboard
+SourceCode: https://github.com/Trion129/WhisperTypeKeyboard
+IssueTracker: https://github.com/Trion129/WhisperTypeKeyboard/issues
+Changelog: https://github.com/Trion129/WhisperTypeKeyboard/releases
+
+AutoName: WhisperType
+
+RepoType: git
+Repo: https://github.com/Trion129/WhisperTypeKeyboard
+
+Builds:
+  - versionName: "1.1.0"
+    versionCode: 2
+    # TODO: set to the exact commit SHA of tag v1.1.0 after tagging
+    commit: 5e5e778fc6c61bf43b7916bf6701bbf871189d89
+    subdir: app
+    sudo:
+      - apt-get update
+      - apt-get install -y -qq bzip2 wget
+    prebuild:
+      - cd ..
+      - bash scripts/fdroid-fetch-jni.sh
+    # Prebuilt FOSS native libs (Apache-2.0 sherpa-onnx + MIT ONNX Runtime) are
+    # fetched in prebuild; ignore binary scan for those paths only.
+    scanignore:
+      - app/src/main/jniLibs
+    gradle:
+      - yes
+    ndk: r27c
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: "1.1.0"
+CurrentVersionCode: 2
+
+AntiFeatures:
+  - TetheredNet
+
+# TetheredNet: first-time model download uses GitHub releases (sherpa-onnx asr-models).
+# Dictation itself is offline after the model is installed. Models are FOSS packages.

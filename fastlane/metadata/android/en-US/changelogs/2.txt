@@ -1,0 +1,3 @@
+Initial public release.
+Full QWERTY IME with offline Parakeet and Whisper Tiny dictation via sherpa-onnx.
+Package id: me.trion.whispertype.
