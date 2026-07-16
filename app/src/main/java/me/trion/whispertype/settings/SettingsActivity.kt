@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.settings
+package me.trion.whispertype.settings
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -11,12 +11,12 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.whispertype.keyboard.R
-import com.whispertype.keyboard.util.Prefs
-import com.whispertype.keyboard.voice.AsrModel
-import com.whispertype.keyboard.voice.LocalAsrEngine
-import com.whispertype.keyboard.voice.ModelCatalog
-import com.whispertype.keyboard.voice.ModelDownloader
+import me.trion.whispertype.R
+import me.trion.whispertype.util.Prefs
+import me.trion.whispertype.voice.AsrModel
+import me.trion.whispertype.voice.LocalAsrEngine
+import me.trion.whispertype.voice.ModelCatalog
+import me.trion.whispertype.voice.ModelDownloader
 import kotlinx.coroutines.launch
 
 class SettingsActivity : AppCompatActivity() {

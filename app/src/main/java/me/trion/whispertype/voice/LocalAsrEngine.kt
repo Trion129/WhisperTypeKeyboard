@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.voice
+package me.trion.whispertype.voice
 
 import android.content.Context
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
@@ -7,7 +7,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import com.k2fsa.sherpa.onnx.WaveReader
-import com.whispertype.keyboard.util.Prefs
+import me.trion.whispertype.util.Prefs
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 

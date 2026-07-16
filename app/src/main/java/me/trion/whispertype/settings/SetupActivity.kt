@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.settings
+package me.trion.whispertype.settings
 
 import android.Manifest
 import android.content.Intent
@@ -11,7 +11,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.whispertype.keyboard.R
+import me.trion.whispertype.R
 
 class SetupActivity : AppCompatActivity() {
     private val micPermissionLauncher = registerForActivityResult(

@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.voice
+package me.trion.whispertype.voice
 
 import android.media.AudioFormat
 import android.media.AudioRecord

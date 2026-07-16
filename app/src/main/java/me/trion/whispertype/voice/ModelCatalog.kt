@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.voice
+package me.trion.whispertype.voice
 
 data class AsrModel(
     val id: String,

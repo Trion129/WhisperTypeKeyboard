@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.ime
+package me.trion.whispertype.ime
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -10,8 +10,8 @@ import android.os.VibratorManager
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.core.content.ContextCompat
-import com.whispertype.keyboard.R
-import com.whispertype.keyboard.util.Prefs
+import me.trion.whispertype.R
+import me.trion.whispertype.util.Prefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

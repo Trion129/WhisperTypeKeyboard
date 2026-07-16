@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.whispertype.keyboard"
+    namespace = "me.trion.whispertype"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.whispertype.keyboard"
+        applicationId = "me.trion.whispertype"
         minSdk = 26
         targetSdk = 35
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 2

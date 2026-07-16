@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.ime
+package me.trion.whispertype.ime
 
 enum class KeyType {
     CHAR,

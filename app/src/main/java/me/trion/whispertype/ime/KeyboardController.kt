@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.ime
+package me.trion.whispertype.ime
 
 import android.content.Context
 import android.content.Intent
@@ -14,11 +14,11 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import com.whispertype.keyboard.R
-import com.whispertype.keyboard.settings.SettingsActivity
-import com.whispertype.keyboard.util.Prefs
-import com.whispertype.keyboard.voice.AudioRecorder
-import com.whispertype.keyboard.voice.LocalAsrEngine
+import me.trion.whispertype.R
+import me.trion.whispertype.settings.SettingsActivity
+import me.trion.whispertype.util.Prefs
+import me.trion.whispertype.voice.AudioRecorder
+import me.trion.whispertype.voice.LocalAsrEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

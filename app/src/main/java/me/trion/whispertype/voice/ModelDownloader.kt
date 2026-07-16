@@ -1,4 +1,4 @@
-package com.whispertype.keyboard.voice
+package me.trion.whispertype.voice
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers

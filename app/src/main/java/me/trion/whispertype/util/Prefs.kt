@@ -1,9 +1,9 @@
-package com.whispertype.keyboard.util
+package me.trion.whispertype.util
 
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.preference.PreferenceManager
-import com.whispertype.keyboard.voice.ModelCatalog
+import me.trion.whispertype.voice.ModelCatalog
 
 class Prefs(context: Context) {
     private val prefs: SharedPreferences =
