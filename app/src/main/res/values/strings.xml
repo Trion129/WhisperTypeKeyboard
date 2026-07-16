@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WhisperType</string>
+    <string name="ime_name">WhisperType Keyboard</string>
+    <string name="subtype_en_us">English (US)</string>
+    <string name="settings_title">WhisperType Settings</string>
+    <string name="setup_title">WhisperType</string>
+    <string name="setup_subtitle">Full keyboard + offline Whisper / Parakeet dictation</string>
+    <string name="step_enable">1. Enable WhisperType</string>
+    <string name="step_enable_desc">Open system keyboard settings and turn on WhisperType Keyboard</string>
+    <string name="step_select">2. Select as default</string>
+    <string name="step_select_desc">Choose WhisperType when the input method picker appears</string>
+    <string name="step_mic">3. Allow microphone</string>
+    <string name="step_mic_desc">Required for on-device voice typing</string>
+    <string name="step_api">4. Download offline model</string>
+    <string name="step_api_desc">Download an on-device model (&lt;100MB) — fully local, no API keys</string>
+    <string name="btn_open_ime_settings">Open keyboard settings</string>
+    <string name="btn_select_ime">Select input method</string>
+    <string name="btn_grant_mic">Grant microphone</string>
+    <string name="btn_open_settings">Download models</string>
+    <string name="btn_test_field">Try typing below</string>
+    <string name="hint_test">Tap here and type or dictate…</string>
+    <string name="pref_haptic">Haptic feedback</string>
+    <string name="pref_auto_space">Auto-space after dictation</string>
+    <string name="status_listening">Listening…</string>
+    <string name="status_transcribing">Transcribing on-device…</string>
+    <string name="status_ready">Ready</string>
+    <string name="error_no_model">Download a model in settings</string>
+    <string name="error_mic_permission">Microphone permission required</string>
+    <string name="error_transcription">Transcription failed</string>
+    <string name="error_no_audio">No speech detected</string>
+</resources>

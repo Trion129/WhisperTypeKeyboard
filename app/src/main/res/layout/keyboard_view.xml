@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/keyboard_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/keyboard_bg"
+    android:orientation="vertical"
+    android:paddingBottom="6dp"
+    android:paddingTop="4dp">
+
+    <LinearLayout
+        android:id="@+id/status_bar"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:layout_marginBottom="4dp"
+        android:layout_marginHorizontal="6dp"
+        android:background="@color/status_bar_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="10dp">
+
+        <TextView
+            android:id="@+id/status_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/status_ready"
+            android:textColor="@color/key_text_secondary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/btn_settings"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="@android:color/transparent"
+            android:gravity="center"
+            android:text="⚙"
+            android:textColor="@color/key_text_secondary"
+            android:textSize="16sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/row1"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="6dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="3dp" />
+
+    <LinearLayout
+        android:id="@+id/row2"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="6dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="3dp" />
+
+    <LinearLayout
+        android:id="@+id/row3"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="6dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="3dp" />
+
+    <LinearLayout
+        android:id="@+id/row4"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="3dp" />
+</LinearLayout>

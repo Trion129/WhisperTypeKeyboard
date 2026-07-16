@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="keyboard_bg">#FF1C1C1E</color>
+    <color name="key_bg">#FF3A3A3C</color>
+    <color name="key_bg_pressed">#FF5A5A5C</color>
+    <color name="key_bg_special">#FF2C2C2E</color>
+    <color name="key_bg_action">#FF0A84FF</color>
+    <color name="key_bg_mic">#FF30D158</color>
+    <color name="key_bg_mic_active">#FFFF453A</color>
+    <color name="key_text">#FFFFFFFF</color>
+    <color name="key_text_secondary">#FFAEAEB2</color>
+    <color name="status_bar_bg">#FF2C2C2E</color>
+    <color name="accent">#FF0A84FF</color>
+    <color name="surface">#FF121212</color>
+    <color name="on_surface">#FFFFFFFF</color>
+</resources>
