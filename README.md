@@ -85,6 +85,39 @@ app/src/main/jniLibs/
 - On-device ASR runtime: [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0)
 - Models downloaded at runtime from the sherpa-onnx `asr-models` release
 
+## Releases (CI)
+
+GitHub Actions builds signed APK + AAB and publishes a GitHub Release **when you run it**.
+
+### Trigger a release
+
+1. Open **Actions** → **Release**
+2. **Run workflow**
+3. Enter:
+   - `version_name` e.g. `1.2.0`
+   - `version_code` e.g. `3` (must increase each time)
+   - optional pre-release flag
+4. Wait for the job; artifacts appear on the Releases page
+
+### Optional production signing
+
+Without secrets, the release APK is **debug-signed** (fine for testers).
+
+For Play Store / production signing, add repo secrets:
+
+| Secret | Description |
+|--------|-------------|
+| `KEYSTORE_BASE64` | Base64 of your `.jks` / `.keystore` |
+| `KEYSTORE_PASSWORD` | Keystore password |
+| `KEY_ALIAS` | Key alias |
+| `KEY_PASSWORD` | Key password |
+
+Encode keystore:
+
+```bash
+base64 -w0 your-release.keystore > keystore.b64
+```
+
 ## License
 
 MIT (see `LICENSE`). Native bindings and libraries from sherpa-onnx remain under Apache-2.0 (see `NOTICE`).
