@@ -89,19 +89,18 @@ jobs:
       - name: Grant Gradle wrapper execute permission
         run: chmod +x gradlew
 
-      - name: Build release APK
+      - name: Apply version from workflow inputs
         run: |
-          ./gradlew assembleRelease \
-            -PversionName="${{ inputs.version_name }}" \
-            -PversionCode="${{ inputs.version_code }}" \
-            --no-daemon
+          set -euo pipefail
+          sed -i "s/versionCode = [0-9]\\+/versionCode = ${{ inputs.version_code }}/" app/build.gradle.kts
+          sed -i "s/versionName = \"[^\"]*\"/versionName = \"${{ inputs.version_name }}\"/" app/build.gradle.kts
+          grep -E 'versionCode|versionName' app/build.gradle.kts
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Build release AAB
-        run: |
-          ./gradlew bundleRelease \
-            -PversionName="${{ inputs.version_name }}" \
-            -PversionCode="${{ inputs.version_code }}" \
-            --no-daemon
+        run: ./gradlew bundleRelease --no-daemon
 
       - name: Prepare artifacts
         id: artifacts

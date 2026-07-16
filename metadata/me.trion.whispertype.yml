@@ -18,26 +18,26 @@ RepoType: git
 Repo: https://github.com/Trion129/WhisperTypeKeyboard
 
 Builds:
-  - versionName: '1.1.0'
-    versionCode: 2
-    commit: 61acf306f70d3aba68ed8dc23c840807e2b3ab3d
+  - versionName: 1.1.1
+    versionCode: 3
+    commit: b6a73d9c94be99cca5bb308f30c71f41309e3401
     subdir: app
     sudo:
       - apt-get update
       - apt-get install -y -qq bzip2 wget
+    gradle:
+      - yes
     prebuild:
       - cd ..
       - bash scripts/fdroid-fetch-jni.sh
     scanignore:
       - app/src/main/jniLibs
-    gradle:
-      - yes
     ndk: r27c
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: '1.1.0'
-CurrentVersionCode: 2
+CurrentVersion: 1.1.1
+CurrentVersionCode: 3
 
 AntiFeatures:
   - TetheredNet

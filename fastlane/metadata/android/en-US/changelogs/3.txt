@@ -1,0 +1,1 @@
+Fix F-Droid CI: strip dependency metadata from APK, plain version fields for checkupdates, category Keyboard & IME.

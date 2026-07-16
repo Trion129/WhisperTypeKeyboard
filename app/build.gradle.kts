@@ -11,11 +11,18 @@ android {
         applicationId = "me.trion.whispertype"
         minSdk = 26
         targetSdk = 35
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 2
-        versionName = (project.findProperty("versionName") as String?) ?: "1.1.0"
+        // Keep these as plain literals so F-Droid checkupdates can parse them.
+        versionCode = 3
+        versionName = "1.1.1"
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
+    }
+
+    // Required by F-Droid: strip Play "Dependency metadata" signing block from APKs.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     signingConfigs {
