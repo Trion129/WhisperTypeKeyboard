@@ -14,7 +14,7 @@ class CtcEngine(
     private val initializerSession: OrtSession,
     private val tokensFile: File,
 ) {
-    private val env = OnnxRuntime.getEnv()
+    private val env = OnnxRuntime.env
     private val tokenTable: List<String> = run {
         tokensFile.readLines().map { line ->
             line.substringBeforeLast(' ')

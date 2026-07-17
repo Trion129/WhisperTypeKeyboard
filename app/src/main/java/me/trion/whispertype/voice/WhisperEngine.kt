@@ -15,7 +15,7 @@ class WhisperEngine(
     private val initializerSession: OrtSession,
     private val tokensTxt: File,
 ) {
-    private val env = OnnxRuntime.getEnv()
+    private val env = OnnxRuntime.env
     private val tokenTable: List<String> = run {
         tokensTxt.readLines().map { line ->
             line.substringBeforeLast(' ')

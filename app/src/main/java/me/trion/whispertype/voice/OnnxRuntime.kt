@@ -5,7 +5,7 @@ import ai.onnxruntime.OrtSession
 import java.io.File
 
 object OnnxRuntime {
-    private val env: OrtEnvironment by lazy {
+    val env: OrtEnvironment by lazy {
         OrtEnvironment.getEnvironment()
     }
 
@@ -13,6 +13,4 @@ object OnnxRuntime {
         val opts = options ?: OrtSession.SessionOptions()
         return env.createSession(modelFile.absolutePath, opts)
     }
-
-    fun getEnv(): OrtEnvironment = env
 }
