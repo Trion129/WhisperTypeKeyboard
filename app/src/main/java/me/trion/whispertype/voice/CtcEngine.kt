@@ -4,6 +4,8 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtSession
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.FloatBuffer
+import java.nio.LongBuffer
 import java.util.Base64
 
 class CtcEngine(
@@ -19,8 +21,10 @@ class CtcEngine(
     }
 
     fun transcribe(pcmFloats: FloatArray): String {
-        val pcmTensor = OnnxTensor.createTensor(env, pcmFloats, longArrayOf(pcmFloats.size.toLong()))
-        val initResult = initializerSession.run(mapOf(WhisperModelConfig.INITIALIZER_INPUT to pcmTensor))
+        val pcmTensor = OnnxTensor.createTensor(
+            env, longArrayOf(pcmFloats.size.toLong()), FloatBuffer.wrap(pcmFloats))
+        val initResult = initializerSession.run(
+            mapOf(WhisperModelConfig.INITIALIZER_INPUT to pcmTensor))
         val melTensor = initResult.get(0) as OnnxTensor
         val melShape = melTensor.info.shape
         val numFrames = melShape[2].toInt()
@@ -35,8 +39,10 @@ class CtcEngine(
             }
         }
 
-        val inputTensor = OnnxTensor.createTensor(env, transposed, longArrayOf(1, numFrames.toLong(), 80L))
-        val lengthTensor = OnnxTensor.createTensor(env, longArrayOf(numFrames.toLong()), longArrayOf(1))
+        val inputTensor = OnnxTensor.createTensor(
+            env, longArrayOf(1, numFrames.toLong(), 80L), FloatBuffer.wrap(transposed))
+        val lengthTensor = OnnxTensor.createTensor(
+            env, longArrayOf(1), LongBuffer.wrap(longArrayOf(numFrames.toLong())))
         val result = modelSession.run(mapOf(
             CtcModelConfig.INPUT to inputTensor,
             CtcModelConfig.INPUT_LENGTH to lengthTensor,
