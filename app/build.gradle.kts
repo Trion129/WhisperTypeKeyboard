@@ -66,11 +66,6 @@ android {
         viewBinding = true
     }
 
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
-    }
 }
 
 dependencies {
@@ -82,4 +77,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.apache.commons:commons-compress:1.26.2")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.0")
 }

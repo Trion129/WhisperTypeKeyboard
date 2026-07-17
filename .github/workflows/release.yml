@@ -45,15 +45,7 @@ jobs:
 
       - name: Install SDK packages
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
-
-      - name: Install build tools (cmake 3.28+, ninja)
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install cmake ninja
-
-      - name: Build native deps (ONNX Runtime + sherpa-onnx JNI)
-        run: bash scripts/fdroid-build-native.sh
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Decode release keystore (optional)
         id: keystore
@@ -116,8 +108,8 @@ jobs:
             ## WhisperType ${{ inputs.version_name }}
 
             - **versionCode:** `${{ inputs.version_code }}`
-            - **Offline ASR:** Parakeet 110M (recommended) + Whisper Tiny.en
-            - **Native runtime:** sherpa-onnx ${{ env.SHERPA_ONNX_VERSION }}
+            - **Offline ASR:** Parakeet TDT-CTC 110M + Whisper Tiny.en
+            - **Runtime:** ONNX Runtime Android (Maven Central)
 
             ### Install
             1. Download `WhisperTypeKeyboard-${{ inputs.version_name }}.apk`

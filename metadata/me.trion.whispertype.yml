@@ -18,25 +18,17 @@ RepoType: git
 Repo: https://github.com/Trion129/WhisperTypeKeyboard
 
 Builds:
-  - versionName: 1.1.1
-    versionCode: 3
+  - versionName: 1.1.2
+    versionCode: 4
     commit: b6a73d9c94be99cca5bb308f30c71f41309e3401
     subdir: app
-    sudo:
-      - apt-get update
-      - apt-get install -y -qq cmake ninja-build python3-pip curl
-      - pip3 install cmake ninja
     gradle:
       - yes
-    prebuild:
-      - cd ..
-      - bash scripts/fdroid-build-native.sh
-    ndk: r27c
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.1.1
-CurrentVersionCode: 3
+CurrentVersion: 1.1.2
+CurrentVersionCode: 4
 
 AntiFeatures:
   NonFreeNet:

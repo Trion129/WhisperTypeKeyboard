@@ -13,7 +13,7 @@ env:
 
 jobs:
   build:
-    name: Build APK (source-built native deps)
+    name: Build APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,24 +28,9 @@ jobs:
       - name: Accept licenses
         run: yes | sdkmanager --licenses >/dev/null || true
 
-      - name: Install SDK + NDK
+      - name: Install SDK
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
-
-      - name: Install build tools (cmake 3.28+, ninja)
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install cmake ninja
-
-      - name: Cache native build artifacts
-        id: cache-native
-        uses: actions/cache@v4
-        with:
-          path: .native-build
-          key: native-${{ hashFiles('scripts/fdroid-build-native.sh') }}
-
-      - name: Build native deps (ONNX Runtime + sherpa-onnx JNI)
-        run: bash scripts/fdroid-build-native.sh
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Grant Gradle wrapper permission
         run: chmod +x gradlew

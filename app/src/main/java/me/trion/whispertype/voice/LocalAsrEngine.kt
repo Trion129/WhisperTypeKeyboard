@@ -1,12 +1,7 @@
 package me.trion.whispertype.voice
 
 import android.content.Context
-import com.k2fsa.sherpa.onnx.OfflineModelConfig
-import com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
-import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
-import com.k2fsa.sherpa.onnx.WaveReader
+import ai.onnxruntime.OrtSession
 import me.trion.whispertype.util.Prefs
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
@@ -14,8 +9,9 @@ import java.util.concurrent.atomic.AtomicReference
 class LocalAsrEngine(private val context: Context) {
     private val prefs = Prefs(context)
     private val downloader = ModelDownloader(context)
-    private val recognizerRef = AtomicReference<OfflineRecognizer?>(null)
+    private val engineRef = AtomicReference<Any?>(null)
     private var loadedModelId: String? = null
+    private var initializerSession: OrtSession? = null
 
     @Synchronized
     fun ensureLoaded(): String? {
@@ -23,17 +19,30 @@ class LocalAsrEngine(private val context: Context) {
         if (!downloader.isInstalled(model)) {
             return "Download a model first (open settings)"
         }
-        if (recognizerRef.get() != null && loadedModelId == model.id) {
+        if (engineRef.get() != null && loadedModelId == model.id) {
             return null
         }
         release()
         return try {
-            val config = OfflineRecognizerConfig(
-                modelConfig = buildModelConfig(model),
-                decodingMethod = "greedy_search"
-            )
-            val recognizer = OfflineRecognizer(assetManager = null, config = config)
-            recognizerRef.set(recognizer)
+            loadInitializer()
+            val dir = downloader.modelFolder(model)
+            when (model.kind) {
+                AsrModel.Kind.WHISPER -> {
+                    val p = model.whisperPrefix
+                    val encSession = OnnxRuntime.loadSession(File(dir, "$p-encoder.int8.onnx"))
+                    val decSession = OnnxRuntime.loadSession(File(dir, "$p-decoder.int8.onnx"))
+                    val tokensFile = File(dir, "$p-tokens.txt")
+                    engineRef.set(WhisperEngine(encSession, decSession, initializerSession!!, tokensFile))
+                }
+                AsrModel.Kind.PARAKEET -> {
+                    val modelFile = listOf("model.int8.onnx", "model.onnx")
+                        .map { File(dir, it) }
+                        .first { it.exists() }
+                    val modelSession = OnnxRuntime.loadSession(modelFile)
+                    val tokensFile = File(dir, "tokens.txt")
+                    engineRef.set(CtcEngine(modelSession, initializerSession!!, tokensFile))
+                }
+            }
             loadedModelId = model.id
             null
         } catch (e: Exception) {
@@ -48,17 +57,15 @@ class LocalAsrEngine(private val context: Context) {
     fun transcribeWav(wavFile: File): Result {
         val loadError = ensureLoaded()
         if (loadError != null) return Result.Error(loadError)
-        val recognizer = recognizerRef.get() ?: return Result.Error("Recognizer not ready")
 
         return try {
-            val wave = WaveReader.readWave(wavFile.absolutePath)
-            if (wave.samples.isEmpty()) return Result.Error("No speech detected")
-            val stream = recognizer.createStream()
-            stream.acceptWaveform(wave.samples, wave.sampleRate)
-            recognizer.decode(stream)
-            val text = recognizer.getResult(stream).text.trim()
-            stream.release()
-            if (text.isEmpty()) Result.Error("No speech detected") else Result.Success(text)
+            val wav = WavReader.read(wavFile)
+            val text = when (val engine = engineRef.get()) {
+                is WhisperEngine -> engine.transcribe(wav.samples)
+                is CtcEngine -> engine.transcribe(wav.samples)
+                else -> return Result.Error("Engine not initialized")
+            }
+            if (text.isBlank()) Result.Error("No speech detected") else Result.Success(text)
         } catch (e: Exception) {
             Result.Error(e.message ?: "Transcription failed")
         }
@@ -66,43 +73,23 @@ class LocalAsrEngine(private val context: Context) {
 
     @Synchronized
     fun release() {
-        recognizerRef.getAndSet(null)?.release()
+        val engine = engineRef.getAndSet(null)
+        when (engine) {
+            is WhisperEngine -> { /* sessions closed by GC or explicit close */ }
+            is CtcEngine -> { /* same */ }
+        }
+        initializerSession?.close()
+        initializerSession = null
         loadedModelId = null
     }
 
-    private fun buildModelConfig(model: AsrModel): OfflineModelConfig {
-        val dir = downloader.modelFolder(model)
-        return when (model.kind) {
-            AsrModel.Kind.WHISPER -> {
-                val p = model.whisperPrefix
-                OfflineModelConfig(
-                    whisper = OfflineWhisperModelConfig(
-                        encoder = File(dir, "$p-encoder.int8.onnx").absolutePath,
-                        decoder = File(dir, "$p-decoder.int8.onnx").absolutePath,
-                        language = "en",
-                        task = "transcribe"
-                    ),
-                    tokens = File(dir, "$p-tokens.txt").absolutePath,
-                    modelType = "whisper",
-                    numThreads = 2,
-                    provider = "cpu",
-                    debug = false
-                )
-            }
-            AsrModel.Kind.PARAKEET -> {
-                val modelFile = listOf("model.int8.onnx", "model.onnx")
-                    .map { File(dir, it) }
-                    .first { it.exists() }
-                OfflineModelConfig(
-                    nemo = OfflineNemoEncDecCtcModelConfig(
-                        model = modelFile.absolutePath
-                    ),
-                    tokens = File(dir, "tokens.txt").absolutePath,
-                    numThreads = 2,
-                    provider = "cpu",
-                    debug = false
-                )
-            }
+    private fun loadInitializer() {
+        if (initializerSession != null) return
+        context.assets.open("whisper/Whisper_initializer.onnx").use { stream ->
+            val bytes = stream.readBytes()
+            val tmpFile = File(context.cacheDir, "Whisper_initializer.onnx")
+            tmpFile.writeBytes(bytes)
+            initializerSession = OnnxRuntime.loadSession(tmpFile)
         }
     }
 

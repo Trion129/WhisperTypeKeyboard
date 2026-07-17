@@ -4,10 +4,12 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.widget.PopupWindow
 import android.view.inputmethod.InputConnection
 import android.widget.Button
 import android.widget.ImageButton
@@ -162,9 +164,15 @@ class KeyboardController(
         when (key.type) {
             KeyType.BACKSPACE -> bindBackspace(view)
             KeyType.MIC -> view.setOnClickListener { onMicTapped() }
-            else -> view.setOnClickListener {
-                performHaptic()
-                onKey(key)
+            else -> {
+                if (key.popupLabels.isNotEmpty()) {
+                    bindKeyWithPopup(view, key)
+                } else {
+                    view.setOnClickListener {
+                        performHaptic()
+                        onKey(key)
+                    }
+                }
             }
         }
         return view
@@ -265,6 +273,100 @@ class KeyboardController(
             }
             KeyType.BACKSPACE, KeyType.MIC -> Unit
         }
+    }
+
+    private fun bindKeyWithPopup(view: View, key: KeyDef) {
+        var longPressed = false
+        var popup: PopupWindow? = null
+        val longPressRunnable = Runnable {
+            longPressed = true
+            performHaptic()
+            popup = showPopupWindow(view, key)
+        }
+
+        view.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    longPressed = false
+                    v.isPressed = true
+                    v.postDelayed(longPressRunnable, 300)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    v.removeCallbacks(longPressRunnable)
+                    v.isPressed = false
+                    if (!longPressed) {
+                        performHaptic()
+                        onKey(key)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    v.removeCallbacks(longPressRunnable)
+                    v.isPressed = false
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun showPopupWindow(anchor: View, key: KeyDef): PopupWindow {
+        val density = context.resources.displayMetrics.density
+
+        val popupContent = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding((8 * density).toInt(), (8 * density).toInt(), (8 * density).toInt(), (8 * density).toInt())
+            setBackgroundColor(ContextCompat.getColor(context, R.color.keyboard_bg))
+            setElevation(6f * density)
+        }
+
+        key.popupLabels.forEach { label ->
+            val btn = Button(context).apply {
+                text = label
+                textSize = 18f
+                setTextColor(ContextCompat.getColor(context, R.color.key_text))
+                setPadding((12 * density).toInt(), 0, (12 * density).toInt(), 0)
+                minimumWidth = 0
+                minimumHeight = 0
+                stateListAnimator = null
+                elevation = 0f
+                background = ContextCompat.getDrawable(context, R.drawable.key_background)
+            }
+            popupContent.addView(btn, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                (44 * density).toInt()
+            ).apply { setMargins((3 * density).toInt(), 0, (3 * density).toInt(), 0) })
+        }
+
+        popupContent.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+
+        val popup = PopupWindow(popupContent, LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT, true)
+        popup.elevation = 6f * density
+
+        for (i in 0 until popupContent.childCount) {
+            val btn = popupContent.getChildAt(i) as Button
+            val label = key.popupLabels[i]
+            btn.setOnClickListener {
+                performHaptic()
+                commitPopupText(label)
+                anchor.isPressed = false
+                popup.dismiss()
+            }
+        }
+
+        val loc = IntArray(2)
+        anchor.getLocationOnScreen(loc)
+        popup.showAtLocation(anchor, Gravity.NO_GRAVITY, loc[0], loc[1] - popupContent.measuredHeight - (8 * density).toInt())
+
+        return popup
+    }
+
+    private fun commitPopupText(text: String) {
+        inputConnectionProvider()?.commitText(text, 1)
     }
 
     private fun deleteOnce() {

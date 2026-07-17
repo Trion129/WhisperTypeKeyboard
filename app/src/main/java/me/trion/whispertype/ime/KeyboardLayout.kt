@@ -20,7 +20,8 @@ data class KeyDef(
     val shiftLabel: String = "",
     val code: Int = 0,
     val weight: Float = 1f,
-    val icon: Boolean = false
+    val icon: Boolean = false,
+    val popupLabels: List<String> = emptyList()
 )
 
 object KeyboardLayout {
@@ -42,10 +43,10 @@ object KeyboardLayout {
         ),
         listOf(
             KeyDef(KeyType.MODE_123, "?123", weight = 1.4f),
-            KeyDef(KeyType.COMMA, ",", ","),
+            KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
             KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
-            KeyDef(KeyType.SPACE, "space", weight = 4.2f),
-            KeyDef(KeyType.PERIOD, ".", "."),
+            KeyDef(KeyType.SPACE, "space", weight = 4.2f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
+            KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
             KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
         )
     )
@@ -54,22 +55,33 @@ object KeyboardLayout {
         listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").map {
             KeyDef(KeyType.CHAR, it, it, it[0].code)
         },
-        listOf("@", "#", "$", "%", "&", "-", "+", "(", ")").map {
-            KeyDef(KeyType.CHAR, it, it, it[0].code)
-        },
+        listOf(
+            KeyDef(KeyType.CHAR, "@", "@", '@'.code),
+            KeyDef(KeyType.CHAR, "#", "#", '#'.code),
+            KeyDef(KeyType.CHAR, "$", "$", '$'.code),
+            KeyDef(KeyType.CHAR, "%", "%", '%'.code),
+            KeyDef(KeyType.CHAR, "&", "&", '&'.code),
+            KeyDef(KeyType.CHAR, "-", "-", '-'.code, popupLabels = listOf("–", "—")),
+            KeyDef(KeyType.CHAR, "+", "+", '+'.code),
+            KeyDef(KeyType.CHAR, "(", "(", '('.code),
+            KeyDef(KeyType.CHAR, ")", ")", ')'.code),
+            KeyDef(KeyType.CHAR, "/", "/", '/'.code, popupLabels = listOf("\\"))
+        ),
         listOf(
             KeyDef(KeyType.MODE_SYMBOLS, "=\\<", weight = 1.4f),
-            *listOf("*", "\"", "'", ":", ";", "!", "?").map {
+            *listOf("*", "\"", "'", ":", ";").map {
                 KeyDef(KeyType.CHAR, it, it, it[0].code)
             }.toTypedArray(),
+            KeyDef(KeyType.CHAR, "!", "!", '!'.code, popupLabels = listOf("¡")),
+            KeyDef(KeyType.CHAR, "?", "?", '?'.code, popupLabels = listOf("¿")),
             KeyDef(KeyType.BACKSPACE, "⌫", weight = 1.4f, icon = true)
         ),
         listOf(
             KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
-            KeyDef(KeyType.COMMA, ",", ","),
+            KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
             KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
-            KeyDef(KeyType.SPACE, "space", weight = 4.2f),
-            KeyDef(KeyType.PERIOD, ".", "."),
+            KeyDef(KeyType.SPACE, "space", weight = 4.2f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
+            KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
             KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
         )
     )
@@ -90,10 +102,10 @@ object KeyboardLayout {
         ),
         listOf(
             KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
-            KeyDef(KeyType.COMMA, ",", ","),
+            KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
             KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
-            KeyDef(KeyType.SPACE, "space", weight = 4.2f),
-            KeyDef(KeyType.PERIOD, ".", "."),
+            KeyDef(KeyType.SPACE, "space", weight = 4.2f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
+            KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
             KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
         )
     )
