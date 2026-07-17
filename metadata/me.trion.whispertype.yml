@@ -24,14 +24,13 @@ Builds:
     subdir: app
     sudo:
       - apt-get update
-      - apt-get install -y -qq bzip2 wget
+      - apt-get install -y -qq cmake ninja-build python3-pip curl
+      - pip3 install cmake ninja
     gradle:
       - yes
     prebuild:
       - cd ..
-      - bash scripts/fdroid-fetch-jni.sh
-    scanignore:
-      - app/src/main/jniLibs
+      - bash scripts/fdroid-build-native.sh
     ndk: r27c
 
 AutoUpdateMode: Version
@@ -40,6 +39,6 @@ CurrentVersion: 1.1.1
 CurrentVersionCode: 3
 
 AntiFeatures:
-  TetheredNet:
-    en-US: Downloads speech recognition model from GitHub on first launch; dictation
-      is fully offline after that.
+  NonFreeNet:
+    en-US: Downloads speech recognition model from GitHub when selected; dictation
+      is fully offline after models are installed.
