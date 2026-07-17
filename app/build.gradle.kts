@@ -12,8 +12,8 @@ android {
         minSdk = 26
         targetSdk = 35
         // Keep these as plain literals so F-Droid checkupdates can parse them.
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "1.1.2"
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }

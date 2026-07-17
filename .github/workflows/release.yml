@@ -21,7 +21,6 @@ permissions:
   contents: write
 
 env:
-  SHERPA_ONNX_VERSION: "v1.13.4"
   JAVA_VERSION: "17"
 
 jobs:
@@ -46,27 +45,15 @@ jobs:
 
       - name: Install SDK packages
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
 
-      - name: Download sherpa-onnx Android native libs
+      - name: Install build tools (cmake 3.28+, ninja)
         run: |
-          set -euo pipefail
-          # Asset name keeps the "v" prefix: sherpa-onnx-v1.13.4-android.tar.bz2
-          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/${SHERPA_ONNX_VERSION}/sherpa-onnx-${SHERPA_ONNX_VERSION}-android.tar.bz2"
-          echo "Downloading $URL"
-          curl -fL --retry 3 --retry-delay 2 -o /tmp/sherpa-onnx-android.tar.bz2 "$URL"
-          mkdir -p /tmp/sherpa-extract app/src/main/jniLibs
-          tar -xjf /tmp/sherpa-onnx-android.tar.bz2 -C /tmp/sherpa-extract
-          # Archive layout: jniLibs/{abi}/*.so
-          if [ -d /tmp/sherpa-extract/jniLibs ]; then
-            cp -a /tmp/sherpa-extract/jniLibs/. app/src/main/jniLibs/
-          else
-            LIBROOT=$(find /tmp/sherpa-extract -type d -name jniLibs | head -n1)
-            test -n "$LIBROOT"
-            cp -a "$LIBROOT"/. app/src/main/jniLibs/
-          fi
-          find app/src/main/jniLibs -name '*.so' | sort
-          test -f app/src/main/jniLibs/arm64-v8a/libsherpa-onnx-jni.so
+          python3 -m pip install --upgrade pip
+          python3 -m pip install cmake ninja
+
+      - name: Build native deps (ONNX Runtime + sherpa-onnx JNI)
+        run: bash scripts/fdroid-build-native.sh
 
       - name: Decode release keystore (optional)
         id: keystore
