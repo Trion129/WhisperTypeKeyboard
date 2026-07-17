@@ -1,11 +1,12 @@
 package me.trion.whispertype.voice
 
+import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtSession
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.nio.FloatBuffer
-import java.nio.LongBuffer
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Base64
 
 class CtcEngine(
@@ -20,9 +21,22 @@ class CtcEngine(
         }
     }
 
+    private fun floatTensor(data: FloatArray, shape: LongArray): OnnxTensor {
+        val bb = ByteBuffer.allocate(data.size * 4).order(ByteOrder.nativeOrder())
+        bb.asFloatBuffer().put(data)
+        bb.rewind()
+        return OnnxTensor.createTensor(env, bb, shape, OnnxJavaType.FLOAT)
+    }
+
+    private fun longTensor(data: LongArray, shape: LongArray): OnnxTensor {
+        val bb = ByteBuffer.allocate(data.size * 8).order(ByteOrder.nativeOrder())
+        bb.asLongBuffer().put(data)
+        bb.rewind()
+        return OnnxTensor.createTensor(env, bb, shape, OnnxJavaType.INT64)
+    }
+
     fun transcribe(pcmFloats: FloatArray): String {
-        val pcmTensor = OnnxTensor.createTensor(
-            env, longArrayOf(pcmFloats.size.toLong()), FloatBuffer.wrap(pcmFloats))
+        val pcmTensor = floatTensor(pcmFloats, longArrayOf(pcmFloats.size.toLong()))
         val initResult = initializerSession.run(
             mapOf(WhisperModelConfig.INITIALIZER_INPUT to pcmTensor))
         val melTensor = initResult.get(0) as OnnxTensor
@@ -39,10 +53,8 @@ class CtcEngine(
             }
         }
 
-        val inputTensor = OnnxTensor.createTensor(
-            env, longArrayOf(1, numFrames.toLong(), 80L), FloatBuffer.wrap(transposed))
-        val lengthTensor = OnnxTensor.createTensor(
-            env, longArrayOf(1), LongBuffer.wrap(longArrayOf(numFrames.toLong())))
+        val inputTensor = floatTensor(transposed, longArrayOf(1, numFrames.toLong(), 80L))
+        val lengthTensor = longTensor(longArrayOf(numFrames.toLong()), longArrayOf(1))
         val result = modelSession.run(mapOf(
             CtcModelConfig.INPUT to inputTensor,
             CtcModelConfig.INPUT_LENGTH to lengthTensor,

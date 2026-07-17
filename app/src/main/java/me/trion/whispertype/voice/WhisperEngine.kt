@@ -1,11 +1,12 @@
 package me.trion.whispertype.voice
 
+import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtSession
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.nio.FloatBuffer
-import java.nio.LongBuffer
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Base64
 
 class WhisperEngine(
@@ -21,9 +22,22 @@ class WhisperEngine(
         }
     }
 
+    private fun floatTensor(data: FloatArray, shape: LongArray): OnnxTensor {
+        val bb = ByteBuffer.allocate(data.size * 4).order(ByteOrder.nativeOrder())
+        bb.asFloatBuffer().put(data)
+        bb.rewind()
+        return OnnxTensor.createTensor(env, bb, shape, OnnxJavaType.FLOAT)
+    }
+
+    private fun longTensor(data: LongArray, shape: LongArray): OnnxTensor {
+        val bb = ByteBuffer.allocate(data.size * 8).order(ByteOrder.nativeOrder())
+        bb.asLongBuffer().put(data)
+        bb.rewind()
+        return OnnxTensor.createTensor(env, bb, shape, OnnxJavaType.INT64)
+    }
+
     fun transcribe(pcmFloats: FloatArray): String {
-        val pcmTensor = OnnxTensor.createTensor(
-            env, longArrayOf(pcmFloats.size.toLong()), FloatBuffer.wrap(pcmFloats))
+        val pcmTensor = floatTensor(pcmFloats, longArrayOf(pcmFloats.size.toLong()))
         val initResult = initializerSession.run(
             mapOf(WhisperModelConfig.INITIALIZER_INPUT to pcmTensor))
         val mel = initResult.get(0) as OnnxTensor
@@ -51,10 +65,8 @@ class WhisperEngine(
         for (step in 0 until MAX_DECODE_LEN) {
             val inputTokens = if (step == 0) tokenIds else listOf(tokenIds.last())
             val idsData = inputTokens.toLongArray()
-            val tokensTensor = OnnxTensor.createTensor(
-                env, longArrayOf(1, inputTokens.size.toLong()), LongBuffer.wrap(idsData))
-            val offsetTensor = OnnxTensor.createTensor(
-                env, longArrayOf(1), LongBuffer.wrap(longArrayOf(offset)))
+            val tokensTensor = longTensor(idsData, longArrayOf(1, inputTokens.size.toLong()))
+            val offsetTensor = longTensor(longArrayOf(offset), longArrayOf(1))
 
             val inputs = mapOf(
                 WhisperModelConfig.DECODER_INPUT_IDS to tokensTensor,
@@ -93,22 +105,22 @@ class WhisperEngine(
         buf.get(data)
 
         return if (frames >= MAX_FRAMES) {
-            val truncated = data.copyOf(N_MEL * MAX_FRAMES)
-            OnnxTensor.createTensor(env, longArrayOf(1, N_MEL.toLong(), MAX_FRAMES.toLong()),
-                FloatBuffer.wrap(truncated))
+            floatTensor(data.copyOf(N_MEL * MAX_FRAMES),
+                longArrayOf(1, N_MEL.toLong(), MAX_FRAMES.toLong()))
         } else {
             val padded = FloatArray(N_MEL * MAX_FRAMES)
             System.arraycopy(data, 0, padded, 0, data.size)
-            OnnxTensor.createTensor(env, longArrayOf(1, N_MEL.toLong(), MAX_FRAMES.toLong()),
-                FloatBuffer.wrap(padded))
+            floatTensor(padded, longArrayOf(1, N_MEL.toLong(), MAX_FRAMES.toLong()))
         }
     }
 
     private fun zeroCache(): OnnxTensor {
         val size = N_DECODER_LAYERS * MAX_DECODE_LEN * D_MODEL
-        return OnnxTensor.createTensor(
-            env, longArrayOf(N_DECODER_LAYERS.toLong(), 1, MAX_DECODE_LEN.toLong(), D_MODEL.toLong()),
-            FloatBuffer.allocate(size))
+        val bb = ByteBuffer.allocate(size * 4).order(ByteOrder.nativeOrder())
+        bb.rewind()
+        return OnnxTensor.createTensor(env, bb,
+            longArrayOf(N_DECODER_LAYERS.toLong(), 1, MAX_DECODE_LEN.toLong(), D_MODEL.toLong()),
+            OnnxJavaType.FLOAT)
     }
 
     private fun argmaxLast(logits: OnnxTensor): Long {
