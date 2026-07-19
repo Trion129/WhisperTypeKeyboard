@@ -131,6 +131,7 @@ jobs:
         with:
           tag_name: v${{ env.VERSION_NAME }}
           name: WhisperType ${{ env.VERSION_NAME }}
+          target_commitish: ${{ github.sha }}
           prerelease: ${{ inputs.prerelease }}
           generate_release_notes: true
           body: |
