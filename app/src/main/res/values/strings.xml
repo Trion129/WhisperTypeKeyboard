@@ -5,7 +5,7 @@
     <string name="subtype_en_us">English (US)</string>
     <string name="settings_title">WhisperType Settings</string>
     <string name="setup_title">WhisperType</string>
-    <string name="setup_subtitle">Full keyboard + offline Whisper / Parakeet dictation</string>
+    <string name="setup_subtitle">Full keyboard + offline Whisper dictation</string>
     <string name="step_enable">1. Enable WhisperType</string>
     <string name="step_enable_desc">Open system keyboard settings and turn on WhisperType Keyboard</string>
     <string name="step_select">2. Select as default</string>
@@ -17,7 +17,7 @@
     <string name="btn_open_ime_settings">Open keyboard settings</string>
     <string name="btn_select_ime">Select input method</string>
     <string name="btn_grant_mic">Grant microphone</string>
-    <string name="btn_open_settings">Download models</string>
+    <string name="btn_open_settings">Download model</string>
     <string name="btn_test_field">Try typing below</string>
     <string name="hint_test">Tap here and type or dictate…</string>
     <string name="pref_haptic">Haptic feedback</string>

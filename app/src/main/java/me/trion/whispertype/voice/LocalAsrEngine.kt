@@ -1,100 +1,68 @@
 package me.trion.whispertype.voice
 
 import android.content.Context
-import ai.onnxruntime.OrtSession
-import me.trion.whispertype.util.Prefs
+import android.util.Log
 import java.io.File
-import java.util.concurrent.atomic.AtomicReference
+import java.util.Collections
+import java.util.WeakHashMap
 
 class LocalAsrEngine(private val context: Context) {
-    private val prefs = Prefs(context)
     private val downloader = ModelDownloader(context)
-    private val engineRef = AtomicReference<Any?>(null)
-    private var loadedModelId: String? = null
-    private var initializerSession: OrtSession? = null
+    private var engine: WhisperEngine? = null
 
-    @Synchronized
-    fun ensureLoaded(): String? {
-        val model = ModelCatalog.byId(prefs.modelId)
-        if (!downloader.isInstalled(model)) {
-            return "Download a model first (open settings)"
-        }
-        if (engineRef.get() != null && loadedModelId == model.id) {
-            return null
-        }
-        release()
+    fun ensureLoaded(): String? = synchronized(engineLock) {
+        if (!downloader.isInstalled()) return "Download a model first (open settings)"
+        if (engine != null) return null
         return try {
-            loadInitializer()
-            val dir = downloader.modelFolder(model)
-            when (model.kind) {
-                AsrModel.Kind.WHISPER -> {
-                    val p = model.whisperPrefix
-                    val encSession = OnnxRuntime.loadSession(File(dir, "$p-encoder.int8.onnx"))
-                    val decSession = OnnxRuntime.loadSession(File(dir, "$p-decoder.int8.onnx"))
-                    val tokensFile = File(dir, "$p-tokens.txt")
-                    engineRef.set(WhisperEngine(encSession, decSession, initializerSession!!, tokensFile))
-                }
-                AsrModel.Kind.PARAKEET -> {
-                    val modelFile = listOf("model.int8.onnx", "model.onnx")
-                        .map { File(dir, it) }
-                        .first { it.exists() }
-                    val modelSession = OnnxRuntime.loadSession(modelFile)
-                    val tokensFile = File(dir, "tokens.txt")
-                    engineRef.set(CtcEngine(modelSession, initializerSession!!, tokensFile))
-                }
-            }
-            loadedModelId = model.id
+            engine = WhisperEngine(
+                initializerFile = downloader.initializerFile,
+                encoderFile = downloader.encoderFile,
+                decoderFile = downloader.decoderFile,
+                cacheInitFile = downloader.cacheInitFile,
+                detokenizerFile = downloader.detokenizerFile,
+            )
+            synchronized(loadedEngines) { loadedEngines.add(this) }
             null
         } catch (e: Exception) {
+            Log.e("WhisperType", "Failed to load model", e)
             "Failed to load model: ${e.message}"
         }
     }
 
-    fun isModelReady(): Boolean = downloader.isInstalled(ModelCatalog.byId(prefs.modelId))
+    fun isModelReady(): Boolean = downloader.isInstalled()
+    fun currentModelTitle(): String = ModelCatalog.MODEL_TITLE
 
-    fun currentModelTitle(): String = ModelCatalog.byId(prefs.modelId).title
-
-    fun transcribeWav(wavFile: File): Result {
+    fun transcribeWav(wavFile: File): Result = synchronized(engineLock) {
         val loadError = ensureLoaded()
         if (loadError != null) return Result.Error(loadError)
-
         return try {
-            val wav = WavReader.read(wavFile)
-            val text = when (val engine = engineRef.get()) {
-                is WhisperEngine -> engine.transcribe(wav.samples)
-                is CtcEngine -> engine.transcribe(wav.samples)
-                else -> return Result.Error("Engine not initialized")
-            }
+            val text = engine!!.transcribe(WavReader.read(wavFile).samples)
             if (text.isBlank()) Result.Error("No speech detected") else Result.Success(text)
         } catch (e: Exception) {
+            Log.e("WhisperType", "Transcription failed", e)
             Result.Error(e.message ?: "Transcription failed")
         }
     }
 
-    @Synchronized
-    fun release() {
-        val engine = engineRef.getAndSet(null)
-        when (engine) {
-            is WhisperEngine -> { /* sessions closed by GC or explicit close */ }
-            is CtcEngine -> { /* same */ }
-        }
-        initializerSession?.close()
-        initializerSession = null
-        loadedModelId = null
-    }
-
-    private fun loadInitializer() {
-        if (initializerSession != null) return
-        context.assets.open("whisper/Whisper_initializer.onnx").use { stream ->
-            val bytes = stream.readBytes()
-            val tmpFile = File(context.cacheDir, "Whisper_initializer.onnx")
-            tmpFile.writeBytes(bytes)
-            initializerSession = OnnxRuntime.loadSession(tmpFile)
-        }
+    fun release() = synchronized(engineLock) {
+        engine?.close()
+        engine = null
+        synchronized(loadedEngines) { loadedEngines.remove(this) }
     }
 
     sealed class Result {
         data class Success(val text: String) : Result()
         data class Error(val message: String) : Result()
+    }
+
+    companion object {
+        private val loadedEngines = Collections.newSetFromMap(
+            WeakHashMap<LocalAsrEngine, Boolean>()
+        )
+        private val engineLock = Any()
+
+        fun releaseAll() = synchronized(engineLock) {
+            loadedEngines.toList().forEach { it.release() }
+        }
     }
 }

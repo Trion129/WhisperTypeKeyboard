@@ -3,167 +3,191 @@ package me.trion.whispertype.voice
 import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtSession
-import java.io.ByteArrayOutputStream
+import ai.onnxruntime.extensions.OrtxPackage
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.Base64
+import java.nio.IntBuffer
+import java.nio.LongBuffer
 
 class WhisperEngine(
-    private val encoderSession: OrtSession,
-    private val decoderSession: OrtSession,
-    private val initializerSession: OrtSession,
-    private val tokensTxt: File,
+    initializerFile: File,
+    encoderFile: File,
+    decoderFile: File,
+    cacheInitFile: File,
+    detokenizerFile: File,
 ) {
     private val env = OnnxRuntime.env
-    private val tokenTable: List<String> = run {
-        tokensTxt.readLines().map { line ->
-            line.substringBeforeLast(' ')
+    private val initSession: OrtSession
+    private val encoderSession: OrtSession
+    private val decoderSession: OrtSession
+    private val cacheInitSession: OrtSession
+    private val detokenizerSession: OrtSession
+
+    init {
+        val opts = OrtSession.SessionOptions().apply {
+            registerCustomOpLibrary(OrtxPackage.getLibraryPath())
+            setCPUArenaAllocator(false)
+            setMemoryPatternOptimization(false)
+            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT)
+        }
+        val encOpts = OrtSession.SessionOptions().apply {
+            registerCustomOpLibrary(OrtxPackage.getLibraryPath())
+            setCPUArenaAllocator(false)
+            setMemoryPatternOptimization(false)
+            setSymbolicDimensionValue("batch_size", 1)
+            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT)
+        }
+        initSession = OnnxRuntime.loadSession(initializerFile, opts)
+        encoderSession = OnnxRuntime.loadSession(encoderFile, encOpts)
+        decoderSession = OnnxRuntime.loadSession(decoderFile, opts)
+        cacheInitSession = OnnxRuntime.loadSession(cacheInitFile, opts)
+        detokenizerSession = OnnxRuntime.loadSession(detokenizerFile, opts)
+    }
+
+    fun transcribe(pcmFloats: FloatArray): String {
+        val initResult = floatTensor(
+            pcmFloats,
+            longArrayOf(1, pcmFloats.size.toLong())
+        ).use { audioTensor ->
+            initSession.run(mapOf("audio_pcm" to audioTensor))
+        }
+        val encResult = initResult.use {
+            val melTensor = it.get(0) as OnnxTensor
+            encoderSession.run(mapOf("input_features" to melTensor))
+        }
+        val cacheResult = encResult.use {
+            val encoderHidden = it.get(0) as OnnxTensor
+            cacheInitSession.run(mapOf("encoder_hidden_states" to encoderHidden))
+        }
+
+        val initialTokens = intArrayOf(
+            ModelConfig.START_TOKEN,
+            ModelConfig.EN_TOKEN,
+            ModelConfig.TRANSCRIBE_TOKEN,
+            ModelConfig.NOTIMESTAMPS_TOKEN
+        )
+        val maxTokens = ((pcmFloats.size / 16000) * 30).coerceIn(4, 448)
+        val completeOutput = mutableListOf<Int>()
+        var prevResult: OrtSession.Result? = null
+        var previousToken = ModelConfig.NOTIMESTAMPS_TOKEN
+        var step = 0
+        var eosReached = false
+
+        try {
+            while (!eosReached && step < maxTokens) {
+                val inputId = if (step < initialTokens.size) initialTokens[step] else previousToken
+
+                val inputIdsTensor = OnnxTensor.createTensor(
+                    env, LongBuffer.wrap(longArrayOf(inputId.toLong())), longArrayOf(1, 1)
+                )
+
+                val decoderInput = mutableMapOf<String, OnnxTensor>()
+                decoderInput["input_ids"] = inputIdsTensor
+
+                var zeroPast: OnnxTensor? = null
+                if (step == 0) {
+                    zeroPast = zeroPastTensor()
+                    for (i in 0 until ModelConfig.N_DECODER_LAYERS) {
+                        decoderInput["past_key_values.$i.decoder.key"] = zeroPast
+                        decoderInput["past_key_values.$i.decoder.value"] = zeroPast
+                        decoderInput["past_key_values.$i.encoder.key"] =
+                            cacheResult.get("present.$i.encoder.key").get() as OnnxTensor
+                        decoderInput["past_key_values.$i.encoder.value"] =
+                            cacheResult.get("present.$i.encoder.value").get() as OnnxTensor
+                    }
+                } else {
+                    for (i in 0 until ModelConfig.N_DECODER_LAYERS) {
+                        decoderInput["past_key_values.$i.decoder.key"] =
+                            prevResult!!.get("present.$i.decoder.key").get() as OnnxTensor
+                        decoderInput["past_key_values.$i.decoder.value"] =
+                            prevResult!!.get("present.$i.decoder.value").get() as OnnxTensor
+                        decoderInput["past_key_values.$i.encoder.key"] =
+                            cacheResult.get("present.$i.encoder.key").get() as OnnxTensor
+                        decoderInput["past_key_values.$i.encoder.value"] =
+                            cacheResult.get("present.$i.encoder.value").get() as OnnxTensor
+                    }
+                }
+
+                val result = try {
+                    decoderSession.run(decoderInput)
+                } finally {
+                    inputIdsTensor.close()
+                    zeroPast?.close()
+                }
+                val logitsTensor = result.get("logits").get() as OnnxTensor
+                val logitsValue = logitsTensor.value as Array<Array<FloatArray>>
+                val logitsRow = logitsValue[0][0]
+
+                var maxIdx = 0
+                for (i in 1 until logitsRow.size) {
+                    if (logitsRow[i] > logitsRow[maxIdx]) maxIdx = i
+                }
+
+                if (maxIdx == ModelConfig.EOS_TOKEN) {
+                    eosReached = true
+                } else {
+                    // Keep the prompt-step predictions in the sequence. The
+                    // model's detokenizer expects the complete decoded sequence.
+                    completeOutput.add(maxIdx)
+                }
+                previousToken = maxIdx
+
+                step++
+                prevResult?.close()
+                prevResult = result
+            }
+
+            if (completeOutput.isEmpty()) {
+                return ""
+            }
+
+            val seqArray = completeOutput.toIntArray()
+            val seqTensor = OnnxTensor.createTensor(
+                env, IntBuffer.wrap(seqArray), longArrayOf(1, 1, seqArray.size.toLong())
+            )
+            val text = try {
+                detokenizerSession.run(mapOf("sequences" to seqTensor)).use { result ->
+                    val textResult = result.get(0).value as Array<Array<String>>
+                    textResult[0][0]
+                }
+            } finally {
+                seqTensor.close()
+            }
+
+            return correctText(text.trim())
+        } finally {
+            prevResult?.close()
+            cacheResult.close()
         }
     }
 
+    private fun correctText(text: String): String {
+        var t = text
+        t = t.replace(Regex("<\\|[^>]*\\|> "), "")
+        t = t.trim()
+        if (t.length >= 2 && t[0].isLowerCase()) {
+            t = t.replaceFirstChar { it.uppercaseChar() }
+        }
+        t = t.replace("...", "")
+        return t
+    }
+
     private fun floatTensor(data: FloatArray, shape: LongArray): OnnxTensor {
-        val bb = ByteBuffer.allocate(data.size * 4).order(ByteOrder.nativeOrder())
+        val bb = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder())
         bb.asFloatBuffer().put(data)
         bb.rewind()
         return OnnxTensor.createTensor(env, bb, shape, OnnxJavaType.FLOAT)
     }
 
-    private fun longTensor(data: LongArray, shape: LongArray): OnnxTensor {
-        val bb = ByteBuffer.allocate(data.size * 8).order(ByteOrder.nativeOrder())
-        bb.asLongBuffer().put(data)
-        bb.rewind()
-        return OnnxTensor.createTensor(env, bb, shape, OnnxJavaType.INT64)
+    private fun zeroPastTensor(): OnnxTensor {
+        val shape = longArrayOf(1, ModelConfig.N_HEADS.toLong(), 0, ModelConfig.HEAD_DIM.toLong())
+        val bb = ByteBuffer.allocateDirect(0)
+        return OnnxTensor.createTensor(env, bb, shape, OnnxJavaType.FLOAT)
     }
 
-    fun transcribe(pcmFloats: FloatArray): String {
-        val pcmTensor = floatTensor(pcmFloats, longArrayOf(pcmFloats.size.toLong()))
-        val initResult = initializerSession.run(
-            mapOf(WhisperModelConfig.INITIALIZER_INPUT to pcmTensor))
-        val mel = initResult.get(0) as OnnxTensor
-        val melPadded = padMel(mel)
-        initResult.close()
-
-        val encResult = encoderSession.run(
-            mapOf(WhisperModelConfig.ENCODER_INPUT to melPadded))
-        val crossK = encResult.get(WhisperModelConfig.ENCODER_OUTPUT_K) as OnnxTensor
-        val crossV = encResult.get(WhisperModelConfig.ENCODER_OUTPUT_V) as OnnxTensor
-        melPadded.close()
-
-        val tokenIds = decodeLoop(crossK, crossV)
-        encResult.close()
-
-        return decodeTokens(tokenIds)
-    }
-
-    private fun decodeLoop(crossK: OnnxTensor, crossV: OnnxTensor): List<Long> {
-        val tokenIds = mutableListOf(START_TOKEN, EN_TOKEN, TRANSCRIBE_TOKEN, NOTIMESTAMPS_TOKEN)
-        var selfKCache = zeroCache()
-        var selfVCache = zeroCache()
-        var offset = 0L
-
-        for (step in 0 until MAX_DECODE_LEN) {
-            val inputTokens = if (step == 0) tokenIds else listOf(tokenIds.last())
-            val idsData = inputTokens.toLongArray()
-            val tokensTensor = longTensor(idsData, longArrayOf(1, inputTokens.size.toLong()))
-            val offsetTensor = longTensor(longArrayOf(offset), longArrayOf(1))
-
-            val inputs = mapOf(
-                WhisperModelConfig.DECODER_INPUT_IDS to tokensTensor,
-                WhisperModelConfig.DECODER_INPUT_SELF_K to selfKCache,
-                WhisperModelConfig.DECODER_INPUT_SELF_V to selfVCache,
-                WhisperModelConfig.DECODER_INPUT_CROSS_K to crossK,
-                WhisperModelConfig.DECODER_INPUT_CROSS_V to crossV,
-                WhisperModelConfig.DECODER_INPUT_OFFSET to offsetTensor,
-            )
-
-            val result = decoderSession.run(inputs)
-            val logits = result.get(WhisperModelConfig.DECODER_OUTPUT_LOGITS) as OnnxTensor
-            val nextToken = argmaxLast(logits)
-
-            if (step == 0) offset = tokenIds.size.toLong()
-
-            selfKCache = result.get(WhisperModelConfig.DECODER_OUTPUT_SELF_K) as OnnxTensor
-            selfVCache = result.get(WhisperModelConfig.DECODER_OUTPUT_SELF_V) as OnnxTensor
-            result.close()
-            tokensTensor.close()
-            offsetTensor.close()
-
-            if (nextToken == EOS_TOKEN || nextToken == NO_SPEECH_TOKEN) break
-            tokenIds.add(nextToken)
-            offset++
-        }
-
-        return tokenIds
-    }
-
-    private fun padMel(mel: OnnxTensor): OnnxTensor {
-        val shape = mel.info.shape
-        val frames = shape[2].toInt()
-        val buf = mel.floatBuffer
-        val data = FloatArray(N_MEL * frames)
-        buf.get(data)
-
-        return if (frames >= MAX_FRAMES) {
-            floatTensor(data.copyOf(N_MEL * MAX_FRAMES),
-                longArrayOf(1, N_MEL.toLong(), MAX_FRAMES.toLong()))
-        } else {
-            val padded = FloatArray(N_MEL * MAX_FRAMES)
-            System.arraycopy(data, 0, padded, 0, data.size)
-            floatTensor(padded, longArrayOf(1, N_MEL.toLong(), MAX_FRAMES.toLong()))
-        }
-    }
-
-    private fun zeroCache(): OnnxTensor {
-        val size = N_DECODER_LAYERS * MAX_DECODE_LEN * D_MODEL
-        val bb = ByteBuffer.allocate(size * 4).order(ByteOrder.nativeOrder())
-        bb.rewind()
-        return OnnxTensor.createTensor(env, bb,
-            longArrayOf(N_DECODER_LAYERS.toLong(), 1, MAX_DECODE_LEN.toLong(), D_MODEL.toLong()),
-            OnnxJavaType.FLOAT)
-    }
-
-    private fun argmaxLast(logits: OnnxTensor): Long {
-        val buf = logits.floatBuffer
-        val shape = logits.info.shape
-        val seqLen = shape[1].toInt()
-        val vocabSize = shape[2].toInt()
-        val start = (seqLen - 1) * vocabSize
-        buf.position(start)
-        val row = FloatArray(vocabSize)
-        buf.get(row)
-        var maxIdx = 0
-        for (i in 1 until vocabSize) {
-            if (row[i] > row[maxIdx]) maxIdx = i
-        }
-        return maxIdx.toLong()
-    }
-
-    private fun decodeTokens(tokenIds: List<Long>): String {
-        val bytes = ByteArrayOutputStream()
-        for (id in tokenIds) {
-            if (id < 0 || id.toInt() >= tokenTable.size) continue
-            val b64 = tokenTable[id.toInt()]
-            try {
-                val decoded = Base64.getDecoder().decode(b64)
-                bytes.write(decoded)
-            } catch (_: Exception) { }
-        }
-        return bytes.toString(Charsets.UTF_8)
-    }
-
-    companion object {
-        const val START_TOKEN = 50258L
-        const val TRANSCRIBE_TOKEN = 50359L
-        const val NOTIMESTAMPS_TOKEN = 50362L
-        const val EOS_TOKEN = 50257L
-        const val NO_SPEECH_TOKEN = 50363L
-        const val EN_TOKEN = 50259L
-
-        const val N_MEL = 80
-        const val MAX_FRAMES = 3000
-        const val MAX_DECODE_LEN = 448
-        const val N_DECODER_LAYERS = 4
-        const val D_MODEL = 384
+    fun close() {
+        listOf(initSession, encoderSession, decoderSession, cacheInitSession, detokenizerSession)
+            .forEach { session -> runCatching { session.close() } }
     }
 }

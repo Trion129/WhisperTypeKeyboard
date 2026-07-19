@@ -3,14 +3,6 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version_name:
-        description: "Version name (e.g. 1.2.0)"
-        required: true
-        type: string
-      version_code:
-        description: "Version code (integer, must increase each release)"
-        required: true
-        type: string
       prerelease:
         description: "Mark GitHub release as pre-release"
         required: false
@@ -68,12 +60,15 @@ jobs:
       - name: Grant Gradle wrapper execute permission
         run: chmod +x gradlew
 
-      - name: Apply version from workflow inputs
+      - name: Read committed version
         run: |
           set -euo pipefail
-          sed -i "s/versionCode = [0-9]\\+/versionCode = ${{ inputs.version_code }}/" app/build.gradle.kts
-          sed -i "s/versionName = \"[^\"]*\"/versionName = \"${{ inputs.version_name }}\"/" app/build.gradle.kts
-          grep -E 'versionCode|versionName' app/build.gradle.kts
+          VERSION_NAME=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
+          VERSION_CODE=$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts)
+          test -n "$VERSION_NAME"
+          test -n "$VERSION_CODE"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
       - name: Build release APK
         run: ./gradlew assembleRelease --no-daemon
@@ -86,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          VER="${{ inputs.version_name }}"
+          VER="$VERSION_NAME"
           APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n1)
           AAB_SRC=$(find app/build/outputs/bundle/release -name "*.aab" | head -n1)
           test -n "$APK_SRC"
@@ -100,21 +95,21 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version_name }}
-          name: WhisperType ${{ inputs.version_name }}
+          tag_name: v${{ env.VERSION_NAME }}
+          name: WhisperType ${{ env.VERSION_NAME }}
           prerelease: ${{ inputs.prerelease }}
           generate_release_notes: true
           body: |
-            ## WhisperType ${{ inputs.version_name }}
+            ## WhisperType ${{ env.VERSION_NAME }}
 
-            - **versionCode:** `${{ inputs.version_code }}`
-            - **Offline ASR:** Parakeet TDT-CTC 110M + Whisper Tiny.en
-            - **Runtime:** ONNX Runtime Android (Maven Central)
+            - **versionCode:** `${{ env.VERSION_CODE }}`
+            - **Offline ASR:** Whisper Small English (int8)
+            - **Runtime:** ONNX Runtime Android + Extensions (Maven Central)
 
             ### Install
-            1. Download `WhisperTypeKeyboard-${{ inputs.version_name }}.apk`
-            2. Install on device (`adb install -r …` or open the APK)
-            3. Enable keyboard → grant mic → download a model in settings
+            1. Download `WhisperTypeKeyboard-${{ env.VERSION_NAME }}.apk`
+            2. Install on device (`adb install -r ...` or open the APK)
+            3. Enable keyboard, grant mic access, and download the model in settings
 
             ### Artifacts
             | File | Use |
@@ -122,7 +117,7 @@ jobs:
             | `.apk` | Sideload / direct install |
             | `.aab` | Play Store upload |
           files: |
-            dist/WhisperTypeKeyboard-${{ inputs.version_name }}.apk
-            dist/WhisperTypeKeyboard-${{ inputs.version_name }}.aab
+            dist/WhisperTypeKeyboard-${{ env.VERSION_NAME }}.apk
+            dist/WhisperTypeKeyboard-${{ env.VERSION_NAME }}.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

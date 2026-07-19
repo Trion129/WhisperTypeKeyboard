@@ -6,7 +6,7 @@ Features:
 • Full QWERTY layout with numbers and symbols layers
 • Shift / caps lock, space, enter, backspace (hold to repeat)
 • Microphone key for on-device speech-to-text
-• Downloadable offline models: NVIDIA Parakeet (recommended) and Whisper Tiny.en
+• Downloadable Whisper Small English model (int8)
 • No API keys — audio is processed on your device
 • Free and open source (MIT)
 
@@ -18,4 +18,4 @@ Setup:
 5. Download a speech model in settings
 6. Type or tap the mic to dictate
 
-On-device recognition uses the free/open sherpa-onnx runtime. Speech models are downloaded on demand from the sherpa-onnx asr-models release (FOSS model packages).
+On-device recognition uses the free/open ONNX Runtime. The Apache-2.0 Whisper model is downloaded on demand from a pinned Hugging Face revision and verified before installation.

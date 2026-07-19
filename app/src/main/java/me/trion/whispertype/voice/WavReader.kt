@@ -40,13 +40,14 @@ object WavReader {
                     fmtBuf.getInt()
                     fmtBuf.getShort()
                     bitsPerSample = fmtBuf.getShort().toInt()
+                    buf.position(buf.position() + chunkSize)
                 }
                 "data" -> {
                     data = ByteArray(chunkSize)
                     buf.get(data)
                 }
                 else -> {
-                    buf.position(buf.position() + chunkSize)
+                    buf.position(minOf(buf.position() + chunkSize, buf.limit()))
                 }
             }
         }
@@ -54,8 +55,8 @@ object WavReader {
         val rawData = requireNotNull(data) { "No data chunk found" }
         require(sampleRate > 0) { "No fmt chunk found" }
 
-        val samples = decodePcm(rawData, bitsPerSample, channels)
-        return WavData(samples, sampleRate)
+        val samples = preprocess(decodePcm(rawData, bitsPerSample, channels), sampleRate)
+        return WavData(samples, TARGET_SAMPLE_RATE)
     }
 
     private fun decodePcm(data: ByteArray, bitsPerSample: Int, channels: Int): FloatArray {
@@ -83,9 +84,38 @@ object WavReader {
         return mono
     }
 
+    private fun preprocess(input: FloatArray, sampleRate: Int): FloatArray {
+        if (input.isEmpty()) return input
+
+        val resampled = if (sampleRate == TARGET_SAMPLE_RATE) input else resample(input, sampleRate)
+        var peak = 0f
+        for (sample in resampled) peak = maxOf(peak, kotlin.math.abs(sample))
+        if (peak == 0f) return resampled
+
+        // Match the reference RTranslator/WhisperIMEplus preprocessing:
+        // preserve the complete recording and normalize by its absolute peak.
+        return FloatArray(resampled.size) { i -> resampled[i] / peak }
+    }
+
+    private fun resample(input: FloatArray, sourceRate: Int): FloatArray {
+        val outputSize = (input.size.toLong() * TARGET_SAMPLE_RATE / sourceRate).toInt()
+        val output = FloatArray(outputSize)
+        val ratio = sourceRate.toDouble() / TARGET_SAMPLE_RATE
+        for (i in output.indices) {
+            val source = i * ratio
+            val left = source.toInt().coerceIn(0, input.lastIndex)
+            val right = (left + 1).coerceAtMost(input.lastIndex)
+            val fraction = source - left
+            output[i] = (input[left] * (1.0 - fraction) + input[right] * fraction).toFloat()
+        }
+        return output
+    }
+
     private fun readString(buf: ByteBuffer, length: Int): String {
         val bytes = ByteArray(length)
         buf.get(bytes)
         return String(bytes, Charsets.US_ASCII)
     }
+
+    private const val TARGET_SAMPLE_RATE = 16_000
 }

@@ -1,46 +1,13 @@
 package me.trion.whispertype.voice
 
-data class AsrModel(
-    val id: String,
-    val title: String,
-    val description: String,
-    val downloadUrl: String,
-    val archiveName: String,
-    val folderName: String,
-    val approxSizeMb: Int,
-    val kind: Kind,
-    val whisperPrefix: String = "",
-    val recommended: Boolean = false
-) {
-    enum class Kind { WHISPER, PARAKEET }
-}
-
 object ModelCatalog {
-    val models: List<AsrModel> = listOf(
-        AsrModel(
-            id = "parakeet-110m-en",
-            title = "Parakeet TDT-CTC 110M EN",
-            description = "Recommended — NVIDIA Parakeet, good English quality.",
-            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8.tar.bz2",
-            archiveName = "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8.tar.bz2",
-            folderName = "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8",
-            approxSizeMb = 100,
-            kind = AsrModel.Kind.PARAKEET,
-            recommended = true
-        ),
-        AsrModel(
-            id = "whisper-tiny-en",
-            title = "Whisper Tiny.en",
-            description = "Fast English Whisper (int8).",
-            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.en.tar.bz2",
-            archiveName = "sherpa-onnx-whisper-tiny.en.tar.bz2",
-            folderName = "sherpa-onnx-whisper-tiny.en",
-            approxSizeMb = 113,
-            kind = AsrModel.Kind.WHISPER,
-            whisperPrefix = "tiny.en"
-        )
-    )
-
-    fun byId(id: String): AsrModel =
-        models.firstOrNull { it.id == id } ?: models.first()
+    const val MODEL_ID = "whisper-small"
+    const val MODEL_TITLE = "Whisper Small EN"
+    const val MODEL_DESC = "Fast English Whisper (int8) — RTranslator pipeline."
+    const val REVISION = "cb523d0fba0f8d9a28a3f7432668a8ea4e8be6e4"
+    const val DOWNLOAD_URL = "https://huggingface.co/DocWolle/whisperOnnx/resolve/$REVISION/whisper_small_int8.zip"
+    const val ARCHIVE_NAME = "whisper_small_int8.zip"
+    const val FOLDER_NAME = "whisper_small_int8"
+    const val APPROX_SIZE_MB = 232
+    const val EXPECTED_SHA256 = "97ac121610693e8c9adaef9c6db9066ef0cbebba53ca6e47f6d1541068ca19e3"
 }

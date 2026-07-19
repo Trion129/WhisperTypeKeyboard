@@ -1,15 +1,16 @@
 WhisperType Keyboard
 Copyright (c) 2026 Trion129
 
-This product includes software developed as part of sherpa-onnx:
-  https://github.com/k2-fsa/sherpa-onnx
-  Copyright (c) Xiaomi Corporation and contributors
-  Licensed under the Apache License, Version 2.0
-
-ONNX Runtime is used via sherpa-onnx prebuilt Android libraries:
+This product uses ONNX Runtime:
   https://onnxruntime.ai/
   Copyright (c) Microsoft Corporation
   Licensed under the MIT License
 
-Speech models are downloaded at runtime from the sherpa-onnx asr-models release
-(Whisper, NVIDIA Parakeet, etc.) under their respective upstream licenses.
+This product uses ONNX Runtime Extensions:
+  https://github.com/microsoft/onnxruntime-extensions
+  Copyright (c) Microsoft Corporation
+  Licensed under the MIT License
+
+The Whisper Small English model is downloaded on demand from:
+  https://huggingface.co/DocWolle/whisperOnnx
+  Licensed under the Apache License, Version 2.0

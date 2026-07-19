@@ -7,32 +7,36 @@ This guide prepares and submits **me.trion.whispertype** to the main F-Droid rep
 | Requirement | Status |
 |-------------|--------|
 | Public source | https://github.com/Trion129/WhisperTypeKeyboard |
-| FOSS license | MIT (`LICENSE`) + NOTICE for sherpa-onnx/ONNX Runtime |
+| FOSS license | MIT (`LICENSE`) + NOTICE for ONNX Runtime/model |
 | No GMS / Firebase / ads | Yes |
 | Builds from source (Gradle) | Yes |
-| FOSS dependencies only | Yes (AndroidX, OkHttp, commons-compress, sherpa-onnx) |
+| FOSS dependencies only | Yes (AndroidX, OkHttp, ONNX Runtime and Extensions) |
 | Upstream metadata (fastlane) | `fastlane/metadata/android/en-US/` |
-| Version tags | Use git tags like `v1.1.0` matching `versionName` |
+| Version tags | Use git tags like `v1.2.0` matching `versionName` |
 
 ### Notes reviewers will care about
 
 1. **Native libraries**  
-   `.so` files are **not** committed. F-Droid `prebuild` runs `scripts/fdroid-fetch-jni.sh`, which downloads the Apache-2.0 sherpa-onnx Android tarball (includes MIT ONNX Runtime).  
-   Metadata uses `scanignore: app/src/main/jniLibs` so the binary scanner accepts those FOSS prebuilts.
+   `.so` files are not committed or downloaded by custom build scripts. The app
+   uses the MIT-licensed `onnxruntime-android` and
+   `onnxruntime-extensions-android` artifacts from Maven Central, which is a
+   trusted repository under the F-Droid Inclusion Policy.
 
 2. **Model downloads**  
-   Speech models are downloaded at runtime from the sherpa-onnx `asr-models` release (FOSS).  
-   Draft metadata marks **TetheredNet** because first-time setup needs GitHub. Dictation is offline after install.
+   The Apache-2.0 Whisper Small model is downloaded only after the user presses
+   Download. Its Hugging Face revision and SHA-256 are pinned in the app.
+   Metadata marks **NonFreeNet** because first-time setup uses Hugging Face;
+   dictation is offline after installation.
 
-3. **Ideal long-term**  
-   Building sherpa-onnx JNI from source on the F-Droid buildserver (NDK) is preferred by some packagers. That is a follow-up if they reject prebuilts.
+3. **Build recipe**  
+   The F-Droid recipe is a plain Gradle build with no `prebuild`, `scanignore`,
+   downloaded JNI archive, or NDK setup.
 
 ## What we added in this repo
 
 ```
 fastlane/metadata/android/en-US/   # store listing text + changelogs
 metadata/me.trion.whispertype.yml  # draft fdroiddata recipe
-scripts/fdroid-fetch-jni.sh        # prebuild helper for JNI libs
 docs/FDROID.md                     # this file
 ```
 
@@ -44,12 +48,15 @@ docs/FDROID.md                     # this file
    `fastlane/metadata/android/en-US/images/phoneScreenshots/`
    (`1.png`, `2.png` — portrait, no device frame required)
 2. Add `fastlane/metadata/android/en-US/images/icon.png` (512×512 recommended)
-3. Tag a release commit:
+3. Commit and push the version change, then run the GitHub **Release** workflow.
+   The workflow creates the matching tag from that commit. For a manual tag:
    ```bash
-   git tag -a v1.1.0 -m "v1.1.0"
-   git push origin v1.1.0
+   git tag -a v1.2.0 -m "v1.2.0"
+   git push origin v1.2.0
    ```
-4. Update `metadata/me.trion.whispertype.yml` → `Builds.commit` to that tag’s **full SHA**
+4. Update `metadata/me.trion.whispertype.yml` → `Builds.commit` to the resulting
+   tag's **full SHA**. This pin is required for the initial submission; future
+   tagged releases are handled by `AutoUpdateMode`.
 
 ### B. Open an F-Droid RFP (optional but recommended)
 
@@ -62,7 +69,7 @@ Include:
 - Source: https://github.com/Trion129/WhisperTypeKeyboard  
 - License: MIT  
 - Summary: offline QWERTY + on-device STT  
-- Note about JNI prebuild script + TetheredNet for model download  
+- Note that ONNX Runtime comes from Maven Central and model download uses NonFreeNet  
 
 ### C. Submit metadata MR to fdroiddata
 

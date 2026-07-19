@@ -87,9 +87,9 @@ class KeyboardController(
 
     private fun refreshReadyStatus() {
         val status = if (asr.isModelReady()) {
-            "Ready · ${asr.currentModelTitle()}"
+            "Ready"
         } else {
-            "Download a model in settings"
+            "Download Whisper Small in settings"
         }
         setStatus(status)
     }
@@ -437,7 +437,7 @@ class KeyboardController(
                     }
                 }
             }
-            runCatching { wav.delete() }
+            wav.delete()
         }
     }
 

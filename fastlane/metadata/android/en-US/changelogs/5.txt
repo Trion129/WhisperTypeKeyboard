@@ -1,0 +1,3 @@
+Whisper Small English replaces the previous multi-model speech pipeline.
+ONNX Runtime dependencies now come from Maven Central for F-Droid-compatible builds.
+Model downloads are pinned and verified with SHA-256 before installation.

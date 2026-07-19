@@ -3,6 +3,7 @@ package me.trion.whispertype.voice
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -22,6 +23,7 @@ class AudioRecorder {
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         if (minBuffer == AudioRecord.ERROR || minBuffer == AudioRecord.ERROR_BAD_VALUE) {
+            Log.e("WhisperType", "AudioRecord.getMinBufferSize failed: $minBuffer")
             return false
         }
 
@@ -35,10 +37,12 @@ class AudioRecorder {
                 bufferSize
             )
         } catch (_: SecurityException) {
+            Log.e("WhisperType", "AudioRecord SecurityException")
             return false
         }
 
         if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+            Log.e("WhisperType", "AudioRecord not initialized, state=${audioRecord.state}")
             audioRecord.release()
             return false
         }
@@ -47,7 +51,6 @@ class AudioRecorder {
         recorder = audioRecord
         isRecording = true
         audioRecord.startRecording()
-
         recordingThread = Thread({
             val buffer = ByteArray(bufferSize)
             while (isRecording) {
@@ -84,7 +87,9 @@ class AudioRecorder {
             pcmBuffer.reset()
         }
 
-        if (pcm.isEmpty() || isSilent(pcm)) {
+        val silent = isSilent(pcm)
+
+        if (pcm.isEmpty() || silent) {
             return null
         }
 
@@ -119,7 +124,8 @@ class AudioRecorder {
             i += 2
         }
         if (count == 0) return true
-        return (sum / count) < SILENCE_THRESHOLD
+        val avg = sum / count
+        return avg < SILENCE_THRESHOLD
     }
 
     private fun writeWav(file: File, pcm: ByteArray, sampleRate: Int) {
@@ -151,6 +157,6 @@ class AudioRecorder {
 
     companion object {
         private const val SAMPLE_RATE = 16_000
-        private const val SILENCE_THRESHOLD = 80
+        private const val SILENCE_THRESHOLD = 50
     }
 }

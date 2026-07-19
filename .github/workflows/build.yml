@@ -35,11 +35,11 @@ jobs:
       - name: Grant Gradle wrapper permission
         run: chmod +x gradlew
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      - name: Test, lint, and build release APK
+        run: ./gradlew testDebugUnitTest lintDebug assembleRelease --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WhisperTypeKeyboard-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: WhisperTypeKeyboard-release
+          path: app/build/outputs/apk/release/*.apk

@@ -5,12 +5,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
-import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
 
 class ModelDownloader(private val context: Context) {
     private val client = OkHttpClient.Builder()
@@ -20,108 +20,86 @@ class ModelDownloader(private val context: Context) {
         .build()
 
     fun modelsDir(): File = File(context.filesDir, "models").also { it.mkdirs() }
+    fun modelDir(): File = File(modelsDir(), ModelCatalog.FOLDER_NAME)
 
-    fun modelFolder(model: AsrModel): File = File(modelsDir(), model.folderName)
+    val initializerFile: File get() = File(modelDir(), "Whisper_initializer.onnx")
+    val encoderFile: File get() = File(modelDir(), "Whisper_encoder.onnx")
+    val decoderFile: File get() = File(modelDir(), "Whisper_decoder.onnx")
+    val cacheInitFile: File get() = File(modelDir(), "Whisper_cache_initializer.onnx")
+    val cacheInitBatchFile: File get() = File(modelDir(), "Whisper_cache_initializer_batch.onnx")
+    val detokenizerFile: File get() = File(modelDir(), "Whisper_detokenizer.onnx")
 
-    fun isInstalled(model: AsrModel): Boolean {
-        val folder = modelFolder(model)
-        if (!folder.isDirectory) return false
-        return when (model.kind) {
-            AsrModel.Kind.WHISPER -> {
-                val p = model.whisperPrefix
-                File(folder, "$p-encoder.int8.onnx").exists() &&
-                    File(folder, "$p-decoder.int8.onnx").exists() &&
-                    File(folder, "$p-tokens.txt").exists()
-            }
-            AsrModel.Kind.PARAKEET -> {
-                (File(folder, "model.int8.onnx").exists() || File(folder, "model.onnx").exists()) &&
-                    File(folder, "tokens.txt").exists()
-            }
-        }
-    }
+    val requiredFiles: List<File> get() = listOf(
+        initializerFile, encoderFile, decoderFile,
+        cacheInitFile, cacheInitBatchFile, detokenizerFile
+    )
 
-    suspend fun download(
-        model: AsrModel,
-        onProgress: (downloaded: Long, total: Long) -> Unit
-    ): Result = withContext(Dispatchers.IO) {
-        try {
-            if (isInstalled(model)) return@withContext Result.AlreadyInstalled
+    fun isInstalled(): Boolean = requiredFiles.all { it.isFile && it.length() > 0L }
 
-            val tmpArchive = File(modelsDir(), model.archiveName + ".part")
-            val request = Request.Builder().url(model.downloadUrl).get().build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return@withContext Result.Error("Download failed: HTTP ${response.code}")
-                }
-                val body = response.body ?: return@withContext Result.Error("Empty response")
-                val total = body.contentLength()
-                body.byteStream().use { input ->
-                    FileOutputStream(tmpArchive).use { out ->
-                        val buffer = ByteArray(DEFAULT_BUFFER)
-                        var read: Int
-                        var sum = 0L
-                        while (input.read(buffer).also { read = it } != -1) {
-                            out.write(buffer, 0, read)
-                            sum += read
-                            onProgress(sum, total)
-                        }
-                    }
-                }
-            }
+    suspend fun download(onProgress: (downloaded: Long, total: Long) -> Unit): Result =
+        withContext(Dispatchers.IO) {
+            try {
+                if (isInstalled()) return@withContext Result.AlreadyInstalled
 
-            extractTarBz2(tmpArchive, modelsDir())
-            tmpArchive.delete()
-
-            if (!isInstalled(model)) {
-                return@withContext Result.Error("Model files missing after extract")
-            }
-            pruneExtraFiles(modelFolder(model))
-            Result.Success
-        } catch (e: Exception) {
-            Result.Error(e.message ?: "Download failed")
-        }
-    }
-
-    fun delete(model: AsrModel) {
-        modelFolder(model).deleteRecursively()
-        File(modelsDir(), model.archiveName).delete()
-        File(modelsDir(), model.archiveName + ".part").delete()
-    }
-
-    private fun extractTarBz2(archive: File, destDir: File) {
-        BufferedInputStream(archive.inputStream()).use { fileIn ->
-            BZip2CompressorInputStream(fileIn).use { bzIn ->
-                TarArchiveInputStream(bzIn).use { tarIn ->
-                    var entry = tarIn.nextEntry
-                    while (entry != null) {
-                        val outFile = File(destDir, entry.name)
-                        if (entry.isDirectory) {
-                            outFile.mkdirs()
-                        } else {
-                            outFile.parentFile?.mkdirs()
-                            FileOutputStream(outFile).use { out ->
-                                tarIn.copyTo(out)
+                val tmpZip = File(modelsDir(), ModelCatalog.ARCHIVE_NAME + ".part")
+                val request = Request.Builder().url(ModelCatalog.DOWNLOAD_URL).get().build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext Result.Error("Download failed: HTTP ${response.code}")
+                    val body = response.body ?: return@withContext Result.Error("Empty response")
+                    val total = body.contentLength()
+                    body.byteStream().use { input ->
+                        FileOutputStream(tmpZip).use { out ->
+                            val buffer = ByteArray(64 * 1024)
+                            var totalRead = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                out.write(buffer, 0, read)
+                                totalRead += read
+                                onProgress(totalRead, total)
                             }
                         }
-                        entry = tarIn.nextEntry
                     }
                 }
-            }
-        }
-    }
 
-    private fun pruneExtraFiles(folder: File) {
-        folder.listFiles()?.forEach { f ->
-            val n = f.name
-            if (n.endsWith(".onnx") && !n.contains(".int8.") &&
-                File(folder, n.replace(".onnx", ".int8.onnx")).exists()
-            ) {
-                f.delete()
-            }
-            if (n == "test_wavs" || n.endsWith(".sh") || n == "README.md") {
-                f.deleteRecursively()
+                val archiveHash = computeSha256(tmpZip)
+                if (!archiveHash.equals(ModelCatalog.EXPECTED_SHA256, ignoreCase = true)) {
+                    tmpZip.delete()
+                    return@withContext Result.Error(
+                        "Archive integrity check failed: expected ${ModelCatalog.EXPECTED_SHA256}, got $archiveHash"
+                    )
+                }
+
+                val staging = File(modelsDir(), ModelCatalog.FOLDER_NAME + ".staging")
+                try {
+                    staging.deleteRecursively()
+                    staging.mkdirs()
+                    extractZipFlat(tmpZip, staging)
+
+                    val missing = verifyRequiredFiles(staging)
+                    if (missing.isNotEmpty()) {
+                        staging.deleteRecursively()
+                        tmpZip.delete()
+                        return@withContext Result.Error("Model files missing after extract: $missing")
+                    }
+
+                    safeInstall(staging, modelDir()).getOrThrow()
+                    tmpZip.delete()
+                    Result.Success
+                } catch (e: Exception) {
+                    staging.deleteRecursively()
+                    tmpZip.delete()
+                    throw e
+                }
+            } catch (e: Exception) {
+                File(modelsDir(), ModelCatalog.ARCHIVE_NAME + ".part").delete()
+                Result.Error(e.message ?: "Download failed")
             }
         }
+
+    fun delete() {
+        modelDir().deleteRecursively()
+        File(modelsDir(), ModelCatalog.ARCHIVE_NAME + ".part").delete()
     }
 
     sealed class Result {
@@ -131,6 +109,104 @@ class ModelDownloader(private val context: Context) {
     }
 
     companion object {
-        private const val DEFAULT_BUFFER = 64 * 1024
+        val REQUIRED_BASENAMES = listOf(
+            "Whisper_initializer.onnx",
+            "Whisper_encoder.onnx",
+            "Whisper_decoder.onnx",
+            "Whisper_cache_initializer.onnx",
+            "Whisper_cache_initializer_batch.onnx",
+            "Whisper_detokenizer.onnx"
+        )
+
+        fun computeSha256(file: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        fun verifyArchiveSha256(file: File, expectedHash: String): Boolean {
+            return computeSha256(file).equals(expectedHash, ignoreCase = true)
+        }
+
+        fun extractZipFlat(zipFile: File, destDir: File) {
+            val seenBasenames = mutableSetOf<String>()
+            ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
+                var entry: ZipEntry? = zis.nextEntry
+                while (entry != null) {
+                    if (!entry!!.isDirectory) {
+                        val basename = File(entry!!.name).name
+                        if (basename.isBlank()) {
+                            entry = zis.nextEntry
+                            continue
+                        }
+                        if (!seenBasenames.add(basename)) {
+                            throw IllegalArgumentException(
+                                "Duplicate required basename in archive: $basename"
+                            )
+                        }
+                        val outFile = File(destDir, basename)
+                        FileOutputStream(outFile).use { out -> zis.copyTo(out) }
+                    }
+                    entry = zis.nextEntry
+                }
+            }
+        }
+
+        fun verifyRequiredFiles(dir: File): List<String> {
+            return REQUIRED_BASENAMES.filter { name ->
+                val f = File(dir, name)
+                !f.isFile || f.length() == 0L
+            }
+        }
+
+        fun safeInstall(stagingDir: File, targetDir: File): kotlin.Result<Unit> {
+            val backupDir = File(targetDir.parentFile, targetDir.name + ".backup")
+            var targetBackedUp = false
+            try {
+                if (!stagingDir.isDirectory) {
+                    return kotlin.Result.failure(IllegalArgumentException("Staging dir is not a directory: $stagingDir"))
+                }
+                val missing = verifyRequiredFiles(stagingDir)
+                if (missing.isNotEmpty()) {
+                    return kotlin.Result.failure(
+                        IllegalArgumentException("Staging dir missing required files: $missing")
+                    )
+                }
+                backupDir.deleteRecursively()
+                if (targetDir.exists()) {
+                    if (!targetDir.renameTo(backupDir)) {
+                        return kotlin.Result.failure(
+                            IllegalStateException("Failed to back up existing model: $targetDir")
+                        )
+                    }
+                    targetBackedUp = true
+                }
+                if (!stagingDir.renameTo(targetDir)) {
+                    if (targetBackedUp && !backupDir.renameTo(targetDir)) {
+                        backupDir.copyRecursively(targetDir, overwrite = true)
+                        backupDir.deleteRecursively()
+                    }
+                    return kotlin.Result.failure(
+                        IllegalStateException("Failed to rename staging to target: $stagingDir -> $targetDir")
+                    )
+                }
+                backupDir.deleteRecursively()
+                return kotlin.Result.success(Unit)
+            } catch (e: Exception) {
+                if (targetBackedUp && !targetDir.exists()) backupDir.renameTo(targetDir)
+                return kotlin.Result.failure(e)
+            } finally {
+                if (stagingDir.exists()) {
+                    stagingDir.deleteRecursively()
+                }
+            }
+        }
     }
 }

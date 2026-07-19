@@ -12,8 +12,8 @@ android {
         minSdk = 26
         targetSdk = 35
         // Keep these as plain literals so F-Droid checkupdates can parse them.
-        versionCode = 4
-        versionName = "1.1.2"
+        versionCode = 5
+        versionName = "1.2.0"
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
@@ -69,13 +69,16 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.android.material:material:1.14.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.1")
     implementation("androidx.preference:preference-ktx:1.2.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.apache.commons:commons-compress:1.26.2")
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-extensions-android:0.13.0")
+
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.27.0")
+    testImplementation("junit:junit:4.13.2")
 }
