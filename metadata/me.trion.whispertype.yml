@@ -20,7 +20,7 @@ Repo: https://github.com/Trion129/WhisperTypeKeyboard
 Builds:
   - versionName: 1.2.0
     versionCode: 5
-    commit: 33e575899b35bc9e4d360672e9a75bf6aa28eb95
+    commit: 2bb729a626759edd30271589d3fcc146df93544e
     subdir: app
     gradle:
       - yes
