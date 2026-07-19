@@ -39,23 +39,25 @@ jobs:
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Decode release keystore (optional)
-        id: keystore
+      - name: Validate and decode release keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "${KEYSTORE_BASE64:-}" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-            echo "present=true" >> "$GITHUB_OUTPUT"
-            echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-            echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
-            echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$GITHUB_ENV"
-            echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> "$GITHUB_ENV"
-            echo "Using production keystore from secrets"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "No KEYSTORE_BASE64 secret — release APK will be debug-signed"
-          fi
+          set -euo pipefail
+          missing=0
+          for val in "$KEYSTORE_BASE64" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD"; do
+            if [ -z "$val" ]; then
+              echo "::error::Missing required signing secret — all four (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD) are required"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          echo "Production keystore decoded to $RUNNER_TEMP/release.keystore"
 
       - name: Grant Gradle wrapper execute permission
         run: chmod +x gradlew
@@ -71,26 +73,58 @@ jobs:
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
       - name: Build release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Build release AAB
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew bundleRelease --no-daemon
 
-      - name: Prepare artifacts
-        id: artifacts
+      - name: Collect split APK artifacts
         run: |
           set -euo pipefail
           mkdir -p dist
           VER="$VERSION_NAME"
-          APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n1)
-          AAB_SRC=$(find app/build/outputs/bundle/release -name "*.aab" | head -n1)
-          test -n "$APK_SRC"
-          test -n "$AAB_SRC"
-          cp "$APK_SRC" "dist/WhisperTypeKeyboard-${VER}.apk"
-          cp "$AAB_SRC" "dist/WhisperTypeKeyboard-${VER}.aab"
+          APK_DIR="app/build/outputs/apk/release"
+          AAB_DIR="app/build/outputs/bundle/release"
+          ABIS=(armeabi-v7a arm64-v8a x86 x86_64)
+          APK_COUNT=0
+          for abi in "${ABIS[@]}"; do
+            mapfile -t hits < <(find "$APK_DIR" -maxdepth 1 -name "*-${abi}-release.apk" -type f)
+            if [ "${#hits[@]}" -eq 0 ]; then
+              echo "::error::No APK found for ABI $abi in $APK_DIR"
+              exit 1
+            fi
+            if [ "${#hits[@]}" -gt 1 ]; then
+              echo "::error::Expected exactly 1 APK for ABI $abi, found ${#hits[@]}"
+              exit 1
+            fi
+            cp "${hits[0]}" "dist/WhisperTypeKeyboard-${VER}-${abi}.apk"
+            echo "Collected $abi -> dist/WhisperTypeKeyboard-${VER}-${abi}.apk"
+            APK_COUNT=$((APK_COUNT + 1))
+          done
+          if [ "$APK_COUNT" -ne 4 ]; then
+            echo "::error::Expected 4 split APKs, collected $APK_COUNT"
+            exit 1
+          fi
+          mapfile -t aab_hits < <(find "$AAB_DIR" -maxdepth 1 -name "*.aab" -type f)
+          if [ "${#aab_hits[@]}" -eq 0 ]; then
+            echo "::error::No AAB found in $AAB_DIR"
+            exit 1
+          fi
+          if [ "${#aab_hits[@]}" -gt 1 ]; then
+            echo "::error::Expected exactly 1 AAB, found ${#aab_hits[@]}"
+            exit 1
+          fi
+          cp "${aab_hits[0]}" "dist/WhisperTypeKeyboard-${VER}.aab"
+          echo "Collected AAB -> dist/WhisperTypeKeyboard-${VER}.aab"
           ls -lh dist/
-          echo "apk=dist/WhisperTypeKeyboard-${VER}.apk" >> "$GITHUB_OUTPUT"
-          echo "aab=dist/WhisperTypeKeyboard-${VER}.aab" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -107,17 +141,28 @@ jobs:
             - **Runtime:** ONNX Runtime Android + Extensions (Maven Central)
 
             ### Install
-            1. Download `WhisperTypeKeyboard-${{ env.VERSION_NAME }}.apk`
+            1. Download the APK for your device ABI from the assets below
             2. Install on device (`adb install -r ...` or open the APK)
             3. Enable keyboard, grant mic access, and download the model in settings
+
+            ### ABI Selection
+            | APK | ABI | Devices |
+            |-----|-----|---------|
+            | `WhisperTypeKeyboard-${{ env.VERSION_NAME }}-armeabi-v7a.apk` | armeabi-v7a | Older 32-bit ARM devices |
+            | `WhisperTypeKeyboard-${{ env.VERSION_NAME }}-arm64-v8a.apk` | arm64-v8a | Most modern ARM devices |
+            | `WhisperTypeKeyboard-${{ env.VERSION_NAME }}-x86.apk` | x86 | 32-bit x86 emulators |
+            | `WhisperTypeKeyboard-${{ env.VERSION_NAME }}-x86_64.apk` | x86_64 | 64-bit x86 emulators |
 
             ### Artifacts
             | File | Use |
             |------|-----|
-            | `.apk` | Sideload / direct install |
+            | `*-<abi>.apk` | Sideload / direct install (pick your ABI) |
             | `.aab` | Play Store upload |
           files: |
-            dist/WhisperTypeKeyboard-${{ env.VERSION_NAME }}.apk
+            dist/WhisperTypeKeyboard-${{ env.VERSION_NAME }}-armeabi-v7a.apk
+            dist/WhisperTypeKeyboard-${{ env.VERSION_NAME }}-arm64-v8a.apk
+            dist/WhisperTypeKeyboard-${{ env.VERSION_NAME }}-x86.apk
+            dist/WhisperTypeKeyboard-${{ env.VERSION_NAME }}-x86_64.apk
             dist/WhisperTypeKeyboard-${{ env.VERSION_NAME }}.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

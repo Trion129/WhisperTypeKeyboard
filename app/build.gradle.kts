@@ -12,10 +12,16 @@ android {
         minSdk = 26
         targetSdk = 35
         // Keep these as plain literals so F-Droid checkupdates can parse them.
-        versionCode = 5
-        versionName = "1.2.0"
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+        versionCode = 6
+        versionName = "1.2.1"
+
+        splits {
+            abi {
+                isEnable = true
+                reset()
+                include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+                isUniversalApk = false
+            }
         }
     }
 
@@ -48,7 +54,7 @@ android {
             signingConfig = if (hasKeystore) {
                 signingConfigs.getByName("release")
             } else {
-                signingConfigs.getByName("debug")
+                null
             }
         }
     }
@@ -66,6 +72,27 @@ android {
         viewBinding = true
     }
 
+}
+
+androidComponents {
+    onVariants(selector().withName("release")) { variant ->
+        val baseCode = android.defaultConfig.versionCode!!
+        variant.outputs.forEach { output ->
+            val abi = output.filters
+                .firstOrNull { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }
+                ?.identifier
+            val offset = when (abi) {
+                "armeabi-v7a" -> 1
+                "arm64-v8a" -> 2
+                "x86" -> 3
+                "x86_64" -> 4
+                else -> 0
+            }
+            if (offset > 0) {
+                output.versionCode.set(baseCode * 10 + offset)
+            }
+        }
+    }
 }
 
 dependencies {
