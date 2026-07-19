@@ -38,11 +38,32 @@ class WhisperEngine(
             setSymbolicDimensionValue("batch_size", 1)
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT)
         }
-        initSession = OnnxRuntime.loadSession(initializerFile, opts)
-        encoderSession = OnnxRuntime.loadSession(encoderFile, encOpts)
-        decoderSession = OnnxRuntime.loadSession(decoderFile, opts)
-        cacheInitSession = OnnxRuntime.loadSession(cacheInitFile, opts)
-        detokenizerSession = OnnxRuntime.loadSession(detokenizerFile, opts)
+        var loadedInit: OrtSession? = null
+        var loadedEncoder: OrtSession? = null
+        var loadedDecoder: OrtSession? = null
+        var loadedCacheInit: OrtSession? = null
+        var loadedDetokenizer: OrtSession? = null
+        try {
+            loadedInit = OnnxRuntime.loadSession(initializerFile, opts)
+            loadedEncoder = OnnxRuntime.loadSession(encoderFile, encOpts)
+            loadedDecoder = OnnxRuntime.loadSession(decoderFile, opts)
+            loadedCacheInit = OnnxRuntime.loadSession(cacheInitFile, opts)
+            loadedDetokenizer = OnnxRuntime.loadSession(detokenizerFile, opts)
+        } catch (e: Exception) {
+            listOfNotNull(
+                loadedInit,
+                loadedEncoder,
+                loadedDecoder,
+                loadedCacheInit,
+                loadedDetokenizer
+            ).forEach { session -> runCatching { session.close() } }
+            throw e
+        }
+        initSession = loadedInit
+        encoderSession = loadedEncoder
+        decoderSession = loadedDecoder
+        cacheInitSession = loadedCacheInit
+        detokenizerSession = loadedDetokenizer
     }
 
     fun transcribe(pcmFloats: FloatArray): String {
