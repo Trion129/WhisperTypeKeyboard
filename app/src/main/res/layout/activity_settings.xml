@@ -19,11 +19,17 @@
             android:textSize="20sp"
             android:textStyle="bold" />
 
+        <Spinner
+            android:id="@+id/model_picker"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="4dp" />
+
         <TextView
             android:id="@+id/model_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
             android:layout_marginBottom="8dp"
             android:textColor="@color/key_text_secondary"
             android:textSize="14sp" />
@@ -32,7 +38,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
-            android:text="Whisper Small runs fully offline. Download from HuggingFace or import a compatible ONNX zip."
+            android:text="Whisper runs fully offline. Download a model from Hugging Face or import a sherpa-onnx Whisper zip."
             android:textColor="@color/key_text_secondary"
             android:textSize="13sp" />
 
@@ -47,7 +53,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp"
+            android:layout_marginBottom="8dp"
             android:orientation="horizontal">
 
             <Button
@@ -56,23 +62,30 @@
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:layout_weight="1"
-                android:text="Download" />
+                android:text="@string/btn_download_model" />
+
+            <Button
+                android:id="@+id/btn_use"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:text="@string/btn_use_model" />
 
             <Button
                 android:id="@+id/btn_import"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
                 android:layout_weight="1"
                 android:text="@string/btn_import_model" />
-
-            <Button
-                android:id="@+id/btn_delete"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Delete" />
         </LinearLayout>
+
+        <Button
+            android:id="@+id/btn_delete"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            android:text="@string/btn_delete_model" />
 
         <TextView
             android:layout_width="match_parent"

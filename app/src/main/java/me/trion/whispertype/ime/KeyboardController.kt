@@ -87,9 +87,9 @@ class KeyboardController(
 
     private fun refreshReadyStatus() {
         val status = if (asr.isModelReady()) {
-            "Ready"
+            context.getString(R.string.status_ready)
         } else {
-            "Download Whisper Small in settings"
+            context.getString(R.string.error_no_model)
         }
         setStatus(status)
     }

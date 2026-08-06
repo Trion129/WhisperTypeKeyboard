@@ -9,19 +9,38 @@ import java.util.WeakHashMap
 
 class LocalAsrEngine(private val context: Context) {
     private val downloader = ModelDownloader(context)
-    private var engine: WhisperEngine? = null
+    private val prefs = Prefs(context)
+    private var engine: SherpaWhisperEngine? = null
+    private var loadedModelId: String? = null
+    private var legacyMaintenanceDone = false
+
+    /**
+     * One-time upgrade path from 1.3.x: the old RTranslator folder is not
+     * usable by sherpa, so it is purged and obsolete prefs are dropped.
+     */
+    private fun runLegacyMaintenance() {
+        if (legacyMaintenanceDone) return
+        legacyMaintenanceDone = true
+        runCatching { downloader.purgeLegacyInstall() }
+        prefs.migrate()
+    }
 
     fun ensureLoaded(): String? = synchronized(engineLock) {
-        if (!downloader.isInstalled()) return "Download a model first (open settings)"
-        if (engine != null) return null
+        runLegacyMaintenance()
+        val id = prefs.activeModelId
+        if (id.isBlank()) return "Install a model in settings"
+        val paths = downloader.resolvePaths(id)
+        if (paths == null) return "Model files are missing, reinstall in settings"
+        if (engine != null && loadedModelId == id) return null
+        if (engine != null) release()
         return try {
-            engine = WhisperEngine(
-                initializerFile = downloader.initializerFile,
-                encoderFile = downloader.encoderFile,
-                decoderFile = downloader.decoderFile,
-                cacheInitFile = downloader.cacheInitFile,
-                detokenizerFile = downloader.detokenizerFile,
+            val (encoder, decoder, tokens) = paths
+            engine = SherpaWhisperEngine(
+                encoderPath = encoder.absolutePath,
+                decoderPath = decoder.absolutePath,
+                tokensPath = tokens.absolutePath,
             )
+            loadedModelId = id
             synchronized(loadedEngines) { loadedEngines.add(this) }
             null
         } catch (e: Exception) {
@@ -30,21 +49,23 @@ class LocalAsrEngine(private val context: Context) {
         }
     }
 
-    fun isModelReady(): Boolean = downloader.isInstalled()
+    fun isModelReady(): Boolean {
+        runLegacyMaintenance()
+        val id = prefs.activeModelId
+        return id.isNotBlank() && downloader.isInstalled(id)
+    }
 
     fun currentModelTitle(): String {
-        val prefs = Prefs(context)
-        return when (prefs.modelSource) {
-            Prefs.MODEL_SOURCE_IMPORT -> "Imported model"
-            else -> ModelCatalog.MODEL_TITLE
-        }
+        val id = prefs.activeModelId
+        return ModelCatalog.byId(id)?.title ?: "Imported model"
     }
 
     fun transcribeWav(wavFile: File): Result = synchronized(engineLock) {
         val loadError = ensureLoaded()
         if (loadError != null) return Result.Error(loadError)
         return try {
-            val text = engine!!.transcribe(WavReader.read(wavFile).samples)
+            val wav = WavReader.read(wavFile)
+            val text = engine!!.transcribe(wav.samples, wav.sampleRate)
             if (text.isBlank()) Result.Error("No speech detected") else Result.Success(text)
         } catch (e: Exception) {
             Log.e("WhisperType", "Transcription failed", e)
@@ -53,8 +74,9 @@ class LocalAsrEngine(private val context: Context) {
     }
 
     fun release() = synchronized(engineLock) {
-        engine?.close()
+        engine?.release()
         engine = null
+        loadedModelId = null
         synchronized(loadedEngines) { loadedEngines.remove(this) }
     }
 

@@ -13,7 +13,7 @@
     <string name="step_mic">3. Allow microphone</string>
     <string name="step_mic_desc">Required for on-device voice typing</string>
     <string name="step_api">4. Download offline model</string>
-    <string name="step_api_desc">Download an on-device Whisper model (~230 MB). Fully local after install.</string>
+    <string name="step_api_desc">Download a Whisper model (Base EN, ~161 MB) or import a package. Fully local after install.</string>
     <string name="btn_open_ime_settings">Open keyboard settings</string>
     <string name="btn_select_ime">Select input method</string>
     <string name="btn_grant_mic">Grant microphone</string>
@@ -25,18 +25,21 @@
     <string name="status_listening">Listening…</string>
     <string name="status_transcribing">Transcribing on-device…</string>
     <string name="status_ready">Ready</string>
-    <string name="error_no_model">Download a model in settings</string>
+    <string name="error_no_model">Install a model in settings</string>
     <string name="error_mic_permission">Microphone permission required</string>
     <string name="error_transcription">Transcription failed</string>
     <string name="error_no_audio">No speech detected</string>
+    <string name="btn_download_model">Download</string>
+    <string name="btn_use_model">Use</string>
+    <string name="btn_delete_model">Delete</string>
     <string name="btn_import_model">Import</string>
     <string name="model_status_not_installed">Not installed</string>
-    <string name="model_status_downloaded">Installed &#8212; %1$s</string>
-    <string name="model_status_imported">Imported model</string>
-    <string name="model_importing">Importing&#8230;</string>
+    <string name="model_status_installed">Installed — tap Use to activate</string>
+    <string name="model_status_active">Active</string>
+    <string name="model_status_import_slot">Imported model</string>
+    <string name="model_importing">Importing…</string>
     <string name="toast_model_ready">Model ready!</string>
     <string name="error_import_read">Could not read the selected file</string>
     <string name="error_import_invalid">Invalid model package (missing files)</string>
-    <string name="error_import_load">Model files could not be loaded</string>
     <string name="error_import_io">Not enough space or write failed</string>
 </resources>

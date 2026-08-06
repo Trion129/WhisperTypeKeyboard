@@ -1,7 +1,5 @@
 package me.trion.whispertype.voice
 
-import ai.onnxruntime.OrtSession
-import ai.onnxruntime.extensions.OrtxPackage
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
@@ -11,24 +9,22 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
 /**
- * Shared install pipeline used by both download and import: extract the zip
- * into a staging dir, verify required files, validate sessions, then swap in
- * via safeInstall. Never touches the live model dir until safeInstall, and
- * never changes prefs. The caller is responsible for setting model_source.
+ * Shared import pipeline: extract the zip into a staging dir, find the three
+ * sherpa Whisper files, canonicalize their names, verify, then swap them into
+ * the target model dir via safeInstall. Never touches any model dir other than
+ * the target, so a failed import leaves every other installed size intact.
+ * The caller is responsible for setting the active model id on success.
  */
-internal fun installModelZip(
+internal fun installImportZip(
     zipFile: File,
     modelsDir: File,
-    modelDir: File,
-    sessionValidator: (File) -> Unit = {},
 ): ModelDownloader.Result {
-    val staging = File(modelsDir, ModelCatalog.FOLDER_NAME + ".staging")
+    val staging = File(modelsDir, "import.staging")
     try {
         staging.deleteRecursively()
         staging.mkdirs()
@@ -38,19 +34,38 @@ internal fun installModelZip(
             return ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_READ)
         }
 
-        val missing = ModelDownloader.verifyRequiredFiles(staging)
-        if (missing.isNotEmpty()) {
+        val found = ModelDownloader.findModelFiles(staging)
+        if (found == null) {
             return ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_INVALID)
         }
+        val (encoder, decoder, tokens) = found
 
-        try {
-            sessionValidator(staging)
-        } catch (e: Exception) {
-            return ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_LOAD)
+        // If the package uses a catalog prefix (tiny.en- / base.en- / small.en-)
+        // it installs into that model id's folder; anything else goes to the
+        // generic import slot.
+        val targetId = ModelDownloader.detectCatalogId(encoder.name) ?: ModelCatalog.IMPORT_ID
+        val names = ModelDownloader.requiredFileNames(targetId)
+        val canonEncoder = File(staging, names[0])
+        val canonDecoder = File(staging, names[1])
+        val canonTokens = File(staging, names[2])
+
+        fun canonicalize(src: File, dest: File) {
+            if (src == dest) return
+            dest.delete()
+            src.copyTo(dest)
+            src.delete()
+        }
+        canonicalize(encoder, canonEncoder)
+        canonicalize(decoder, canonDecoder)
+        canonicalize(tokens, canonTokens)
+
+        // Drop anything that is not one of the three canonical files.
+        staging.listFiles()?.forEach { f ->
+            if (f.name != names[0] && f.name != names[1] && f.name != names[2]) f.delete()
         }
 
-        return ModelDownloader.safeInstall(staging, modelDir).fold(
-            onSuccess = { ModelDownloader.Result.Success },
+        return ModelDownloader.safeInstall(staging, File(modelsDir, targetId), names).fold(
+            onSuccess = { ModelDownloader.Result.Success(targetId) },
             onFailure = { ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_IO) }
         )
     } finally {
@@ -59,10 +74,7 @@ internal fun installModelZip(
     }
 }
 
-class ModelDownloader(
-    private val context: Context,
-    private val sessionValidator: (File) -> Unit = Companion::validateSessions,
-) {
+class ModelDownloader(private val context: Context) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
@@ -70,63 +82,112 @@ class ModelDownloader(
         .build()
 
     fun modelsDir(): File = File(context.filesDir, "models").also { it.mkdirs() }
-    fun modelDir(): File = File(modelsDir(), ModelCatalog.FOLDER_NAME)
 
-    val initializerFile: File get() = File(modelDir(), "Whisper_initializer.onnx")
-    val encoderFile: File get() = File(modelDir(), "Whisper_encoder.onnx")
-    val decoderFile: File get() = File(modelDir(), "Whisper_decoder.onnx")
-    val cacheInitFile: File get() = File(modelDir(), "Whisper_cache_initializer.onnx")
-    val cacheInitBatchFile: File get() = File(modelDir(), "Whisper_cache_initializer_batch.onnx")
-    val detokenizerFile: File get() = File(modelDir(), "Whisper_detokenizer.onnx")
+    fun modelDir(id: String): File = File(modelsDir(), id)
 
-    val requiredFiles: List<File> get() = listOf(
-        initializerFile, encoderFile, decoderFile,
-        cacheInitFile, cacheInitBatchFile, detokenizerFile
-    )
+    /** True when the model dir holds all three required files, non-empty. */
+    fun isInstalled(id: String): Boolean = isInstalledDir(modelsDir(), id)
 
-    fun isInstalled(): Boolean = requiredFiles.all { it.isFile && it.length() > 0L }
+    /**
+     * Returns (encoder, decoder, tokens) for the given id, or null when any
+     * required file is missing or empty.
+     */
+    fun resolvePaths(id: String): Triple<File, File, File>? = resolvePathsIn(modelsDir(), id)
 
-    suspend fun download(onProgress: (downloaded: Long, total: Long) -> Unit): Result =
+    /** Deletes the legacy RTranslator install folder (whisper_small_int8). */
+    fun purgeLegacyInstall() {
+        purgeLegacyDir(modelsDir())
+    }
+
+    /**
+     * Downloads the three files of the catalog model [id] into
+     * models/<id>/ with their final names. Progress reports the sum of bytes
+     * across all files against the sum of known content lengths. A partial or
+     * failed download is never counted as installed (all three files are
+     * required), and other model dirs are never touched.
+     */
+    suspend fun download(id: String, onProgress: (done: Long, total: Long) -> Unit): Result =
         withContext(Dispatchers.IO) {
+            val spec = ModelCatalog.byId(id)
+            if (spec == null) return@withContext Result.Error("Unknown model id: $id")
             try {
-                if (isInstalled()) return@withContext Result.AlreadyInstalled
+                if (isInstalled(id)) return@withContext Result.Success(id)
 
-                val tmpZip = File(modelsDir(), ModelCatalog.ARCHIVE_NAME + ".part")
-                val request = Request.Builder().url(ModelCatalog.DOWNLOAD_URL).get().build()
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@withContext Result.Error("Download failed: HTTP ${response.code}")
-                    val body = response.body ?: return@withContext Result.Error("Empty response")
-                    val total = body.contentLength()
-                    body.byteStream().use { input ->
-                        FileOutputStream(tmpZip).use { out ->
-                            val buffer = ByteArray(64 * 1024)
-                            var totalRead = 0L
-                            while (true) {
-                                val read = input.read(buffer)
-                                if (read < 0) break
-                                out.write(buffer, 0, read)
-                                totalRead += read
-                                onProgress(totalRead, total)
+                val dir = modelDir(id)
+                dir.mkdirs()
+
+                val files = listOf(
+                    spec.encoderFileName to spec.encoderUrl(),
+                    spec.decoderFileName to spec.decoderUrl(),
+                    spec.tokensFileName to spec.tokensUrl(),
+                )
+
+                // Sum content lengths up front so progress has a stable total.
+                var total = 0L
+                for ((_, url) in files) {
+                    try {
+                        val head = Request.Builder().url(url).head().build()
+                        client.newCall(head).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                val len = resp.body?.contentLength() ?: -1L
+                                if (len > 0) total += len
                             }
                         }
+                    } catch (e: Exception) {
+                        // Totals stay partial; progress falls back to bytes done.
                     }
                 }
 
-                val archiveHash = computeSha256(tmpZip)
-                if (!archiveHash.equals(ModelCatalog.EXPECTED_SHA256, ignoreCase = true)) {
-                    tmpZip.delete()
-                    return@withContext Result.Error(
-                        "Archive integrity check failed: expected ${ModelCatalog.EXPECTED_SHA256}, got $archiveHash"
-                    )
+                var done = 0L
+                for ((name, url) in files) {
+                    val part = File(dir, "$name.part")
+                    part.delete()
+                    val request = Request.Builder().url(url).get().build()
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            part.delete()
+                            return@withContext Result.Error(
+                                "Download failed: HTTP ${response.code} ($name)"
+                            )
+                        }
+                        val body = response.body
+                            ?: return@withContext Result.Error("Empty response ($name)")
+                        body.byteStream().use { input ->
+                            FileOutputStream(part).use { out ->
+                                val buffer = ByteArray(64 * 1024)
+                                while (true) {
+                                    val read = input.read(buffer)
+                                    if (read < 0) break
+                                    out.write(buffer, 0, read)
+                                    done += read
+                                    onProgress(done, total)
+                                }
+                            }
+                        }
+                    }
+                    if (!part.renameTo(File(dir, name))) {
+                        part.delete()
+                        return@withContext Result.Error("Failed to write model file: $name")
+                    }
                 }
 
-                installModelZip(tmpZip, modelsDir(), modelDir(), sessionValidator)
+                if (resolvePaths(id) == null) {
+                    return@withContext Result.Error("Model files incomplete after download")
+                }
+                Result.Success(id)
             } catch (e: Exception) {
-                File(modelsDir(), ModelCatalog.ARCHIVE_NAME + ".part").delete()
+                modelDir(id).listFiles()?.forEach { f ->
+                    if (f.name.endsWith(".part")) f.delete()
+                }
                 Result.Error(e.message ?: "Download failed")
             }
         }
 
+    /**
+     * Copies a sherpa Whisper zip from [uri] into staging, validates the three
+     * required files, installs them into the detected catalog id folder or the
+     * import slot, and returns Success with the installed id.
+     */
     suspend fun importFromUri(uri: Uri, onProgress: (copied: Long, total: Long) -> Unit): Result =
         withContext(Dispatchers.IO) {
             val partFile = File(modelsDir(), "import.zip.part")
@@ -158,95 +219,97 @@ class ModelDownloader(
                     partFile.delete()
                     return@withContext Result.Error(MSG_IMPORT_IO)
                 }
-                installModelZip(partFile, modelsDir(), modelDir(), sessionValidator)
+                installImportZip(partFile, modelsDir())
             } catch (e: Exception) {
                 partFile.delete()
                 Result.Error(MSG_IMPORT_READ)
             }
         }
 
-    fun delete() {
-        modelDir().deleteRecursively()
-        File(modelsDir(), ModelCatalog.ARCHIVE_NAME + ".part").delete()
-        File(modelsDir(), "import.zip.part").delete()
+    /** Deletes the install for [id] (downloads and imports alike). */
+    fun delete(id: String) {
+        modelDir(id).deleteRecursively()
     }
 
     sealed class Result {
-        data object Success : Result()
-        data object AlreadyInstalled : Result()
+        data class Success(val modelId: String) : Result()
         data class Error(val message: String) : Result()
     }
 
     companion object {
-        val REQUIRED_BASENAMES = listOf(
-            "Whisper_initializer.onnx",
-            "Whisper_encoder.onnx",
-            "Whisper_decoder.onnx",
-            "Whisper_cache_initializer.onnx",
-            "Whisper_cache_initializer_batch.onnx",
-            "Whisper_detokenizer.onnx"
-        )
-
-        // The files WhisperEngine actually loads at runtime
-        // (cache_initializer_batch is required for install but never loaded).
-        val SESSION_BASENAMES = listOf(
-            "Whisper_initializer.onnx",
-            "Whisper_encoder.onnx",
-            "Whisper_decoder.onnx",
-            "Whisper_cache_initializer.onnx",
-            "Whisper_detokenizer.onnx"
-        )
-
         const val MSG_IMPORT_READ = "Could not read the selected file"
-        const val MSG_IMPORT_INVALID = "Invalid model package (missing files)"
-        const val MSG_IMPORT_LOAD = "Model files could not be loaded"
+        const val MSG_IMPORT_INVALID = "Invalid sherpa Whisper package (missing files)"
         const val MSG_IMPORT_IO = "Not enough space or write failed"
 
-        fun computeSha256(file: File): String {
-            val digest = MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buffer = ByteArray(8192)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    digest.update(buffer, 0, read)
-                }
+        val ENCODER_SUFFIXES = listOf("encoder.int8.onnx", "encoder.onnx")
+        val DECODER_SUFFIXES = listOf("decoder.int8.onnx", "decoder.onnx")
+        val TOKENS_SUFFIXES = listOf("tokens.txt")
+
+        /**
+         * Canonical file basenames inside a model dir for the given id.
+         * Catalog ids use <id>-encoder.int8.onnx etc.; the import slot uses
+         * encoder.int8.onnx etc.
+         */
+        fun requiredFileNames(id: String): List<String> = when (id) {
+            ModelCatalog.IMPORT_ID -> listOf("encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt")
+            else -> {
+                val spec = ModelCatalog.byId(id) ?: return emptyList()
+                listOf(spec.encoderFileName, spec.decoderFileName, spec.tokensFileName)
             }
-            return digest.digest().joinToString("") { "%02x".format(it) }
         }
 
-        fun verifyArchiveSha256(file: File, expectedHash: String): Boolean {
-            return computeSha256(file).equals(expectedHash, ignoreCase = true)
+        fun isInstalledDir(dir: File, id: String): Boolean = resolvePathsIn(dir, id) != null
+
+        fun resolvePathsIn(dir: File, id: String): Triple<File, File, File>? {
+            val modelDir = File(dir, id)
+            if (id == ModelCatalog.IMPORT_ID) {
+                val encoder = findFirst(modelDir, ENCODER_SUFFIXES) ?: return null
+                val decoder = findFirst(modelDir, DECODER_SUFFIXES) ?: return null
+                val tokens = findFirst(modelDir, TOKENS_SUFFIXES) ?: return null
+                return Triple(encoder, decoder, tokens)
+            }
+            val spec = ModelCatalog.byId(id) ?: return null
+            val encoder = File(modelDir, spec.encoderFileName)
+            val decoder = File(modelDir, spec.decoderFileName)
+            val tokens = File(modelDir, spec.tokensFileName)
+            if (!encoder.isFile || encoder.length() == 0L) return null
+            if (!decoder.isFile || decoder.length() == 0L) return null
+            if (!tokens.isFile || tokens.length() == 0L) return null
+            return Triple(encoder, decoder, tokens)
+        }
+
+        fun purgeLegacyDir(modelsDir: File) {
+            File(modelsDir, ModelCatalog.LEGACY_FOLDER).deleteRecursively()
         }
 
         /**
-         * Opens the five runtime sessions exactly like WhisperEngine does
-         * (including the custom-op library and encoder options) and closes
-         * them all. Throws if any session fails to open.
+         * Detects a catalog id from an imported encoder basename prefix
+         * (tiny.en- / base.en- / small.en-), or null for unknown packages.
          */
-        fun validateSessions(dir: File) {
-            val opts = OrtSession.SessionOptions().apply {
-                registerCustomOpLibrary(OrtxPackage.getLibraryPath())
-                setCPUArenaAllocator(false)
-                setMemoryPatternOptimization(false)
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT)
-            }
-            val encOpts = OrtSession.SessionOptions().apply {
-                registerCustomOpLibrary(OrtxPackage.getLibraryPath())
-                setCPUArenaAllocator(false)
-                setMemoryPatternOptimization(false)
-                setSymbolicDimensionValue("batch_size", 1)
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT)
-            }
-            val opened = mutableListOf<OrtSession>()
-            try {
-                for (name in SESSION_BASENAMES) {
-                    val fileOpts = if (name == "Whisper_encoder.onnx") encOpts else opts
-                    opened.add(OnnxRuntime.loadSession(File(dir, name), fileOpts))
+        fun detectCatalogId(encoderName: String): String? =
+            ModelCatalog.entries.firstOrNull { encoderName.startsWith("${it.id}-") }?.id
+
+        /**
+         * Locates the three logical files in a flat extracted dir.
+         * Prefers int8 encoder/decoder names; falls back to plain .onnx.
+         * Returns null when any file is missing or empty.
+         */
+        fun findModelFiles(dir: File): Triple<File, File, File>? {
+            val encoder = findFirst(dir, ENCODER_SUFFIXES) ?: return null
+            val decoder = findFirst(dir, DECODER_SUFFIXES) ?: return null
+            val tokens = findFirst(dir, TOKENS_SUFFIXES) ?: return null
+            return Triple(encoder, decoder, tokens)
+        }
+
+        fun findFirst(dir: File, suffixes: List<String>): File? {
+            if (!dir.isDirectory) return null
+            for (suffix in suffixes) {
+                val match = dir.listFiles()?.firstOrNull {
+                    it.isFile && it.name.endsWith(suffix) && it.length() > 0L
                 }
-            } finally {
-                opened.forEach { session -> runCatching { session.close() } }
+                if (match != null) return match
             }
+            return null
         }
 
         fun extractZipFlat(zipFile: File, destDir: File) {
@@ -273,21 +336,30 @@ class ModelDownloader(
             }
         }
 
-        fun verifyRequiredFiles(dir: File): List<String> {
-            return REQUIRED_BASENAMES.filter { name ->
+        fun verifyRequiredFiles(dir: File, requiredNames: List<String>): List<String> {
+            return requiredNames.filter { name ->
                 val f = File(dir, name)
                 !f.isFile || f.length() == 0L
             }
         }
 
-        fun safeInstall(stagingDir: File, targetDir: File): kotlin.Result<Unit> {
+        /**
+         * Atomic-ish swap: verifies [requiredNames] in [stagingDir], backs up
+         * the existing target dir, then renames staging into place. On any
+         * failure the previous target is restored.
+         */
+        fun safeInstall(
+            stagingDir: File,
+            targetDir: File,
+            requiredNames: List<String>,
+        ): kotlin.Result<Unit> {
             val backupDir = File(targetDir.parentFile, targetDir.name + ".backup")
             var targetBackedUp = false
             try {
                 if (!stagingDir.isDirectory) {
                     return kotlin.Result.failure(IllegalArgumentException("Staging dir is not a directory: $stagingDir"))
                 }
-                val missing = verifyRequiredFiles(stagingDir)
+                val missing = verifyRequiredFiles(stagingDir, requiredNames)
                 if (missing.isNotEmpty()) {
                     return kotlin.Result.failure(
                         IllegalArgumentException("Staging dir missing required files: $missing")

@@ -22,6 +22,6 @@ SOFTWARE.
 
 ---
 
-This project includes prebuilt native libraries and Kotlin JNI bindings from
-sherpa-onnx (https://github.com/k2-fsa/sherpa-onnx), which is licensed under
+This project may bundle sherpa-onnx native libraries via the JitPack
+dependency (https://github.com/k2-fsa/sherpa-onnx), which is licensed under
 the Apache License 2.0. See NOTICE for attribution.

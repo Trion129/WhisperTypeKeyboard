@@ -15,8 +15,8 @@ Unlike dictation-only apps that only show a mic button, WhisperType is a full in
 | Feature | Details |
 |--------|---------|
 | Typing | Full QWERTY keyboard with `?123` and symbols layers |
-| Voice | Fully offline via [ONNX Runtime](https://onnxruntime.ai/) |
-| Model | **Whisper Small English** (int8) |
+| Voice | Fully offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) |
+| Model | **Whisper Base EN** (int8) by default; tiny.en / base.en / small.en catalog, or import your own package |
 | Privacy | No API keys — audio never leaves the device |
 
 ## Setup
@@ -26,7 +26,7 @@ Unlike dictation-only apps that only show a mic button, WhisperType is a full in
 3. Enable the keyboard in system settings
 4. Select WhisperType as input method
 5. Grant microphone permission
-6. Open **Download model** and download Whisper Small
+6. Open **Download model** and download Base EN (~161 MB, recommended) — or import a sherpa-onnx Whisper zip
 7. Tap mic on the keyboard to dictate offline
 
 ## Usage
@@ -39,7 +39,7 @@ Unlike dictation-only apps that only show a mic button, WhisperType is a full in
 
 ## Build
 
-Build directly with Gradle; ONNX Runtime dependencies are resolved from Maven Central:
+Build directly with Gradle; sherpa-onnx is resolved from JitPack:
 
 ```bash
 cd WhisperTypeKeyboard
@@ -76,8 +76,8 @@ app/src/main/java/me/trion/whispertype/
 
 ## Credits
 
-- On-device ASR runtime: [ONNX Runtime](https://github.com/microsoft/onnxruntime) and [ONNX Runtime Extensions](https://github.com/microsoft/onnxruntime-extensions) (MIT)
-- Whisper Small model downloaded on demand from the pinned [DocWolle/whisperOnnx](https://huggingface.co/DocWolle/whisperOnnx) revision (Apache-2.0)
+- On-device ASR runtime: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0), which bundles ONNX Runtime (MIT)
+- Whisper models (tiny.en / base.en / small.en int8) downloaded on demand from the official [csukuangfj/sherpa-onnx-whisper-*](https://huggingface.co/csukuangfj) Hugging Face packs (OpenAI Whisper weights, MIT)
 
 ## F-Droid
 

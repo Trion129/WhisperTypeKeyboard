@@ -1,13 +1,30 @@
 package me.trion.whispertype.voice
 
+data class ModelSpec(
+    val id: String,
+    val title: String,
+    val approxSizeMb: Int,
+) {
+    val encoderFileName: String get() = "$id-encoder.int8.onnx"
+    val decoderFileName: String get() = "$id-decoder.int8.onnx"
+    val tokensFileName: String get() = "$id-tokens.txt"
+    fun baseUrl(): String =
+        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-$id/resolve/main"
+    fun encoderUrl() = "${baseUrl()}/$encoderFileName"
+    fun decoderUrl() = "${baseUrl()}/$decoderFileName"
+    fun tokensUrl() = "${baseUrl()}/$tokensFileName"
+}
+
 object ModelCatalog {
-    const val MODEL_ID = "whisper-small"
-    const val MODEL_TITLE = "Whisper Small EN"
-    const val MODEL_DESC = "Fast English Whisper (int8) — RTranslator pipeline."
-    const val REVISION = "cb523d0fba0f8d9a28a3f7432668a8ea4e8be6e4"
-    const val DOWNLOAD_URL = "https://huggingface.co/DocWolle/whisperOnnx/resolve/$REVISION/whisper_small_int8.zip"
-    const val ARCHIVE_NAME = "whisper_small_int8.zip"
-    const val FOLDER_NAME = "whisper_small_int8"
-    const val APPROX_SIZE_MB = 232
-    const val EXPECTED_SHA256 = "97ac121610693e8c9adaef9c6db9066ef0cbebba53ca6e47f6d1541068ca19e3"
+    const val DEFAULT_ID = "base.en"
+    const val IMPORT_ID = "import"
+    const val LEGACY_FOLDER = "whisper_small_int8"
+
+    val entries: List<ModelSpec> = listOf(
+        ModelSpec("tiny.en", "Whisper Tiny EN", 104),
+        ModelSpec("base.en", "Whisper Base EN", 161),
+        ModelSpec("small.en", "Whisper Small EN", 375),
+    )
+
+    fun byId(id: String): ModelSpec? = entries.find { it.id == id }
 }

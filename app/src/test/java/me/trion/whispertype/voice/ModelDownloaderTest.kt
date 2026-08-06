@@ -7,7 +7,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.FileOutputStream
-import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -17,39 +16,54 @@ class ModelDownloaderTest {
     val tempFolder = TemporaryFolder()
 
     private lateinit var modelsDir: File
-    private lateinit var modelDir: File
 
     @Before
     fun setUp() {
         modelsDir = tempFolder.newFolder("models")
-        modelDir = File(modelsDir, ModelCatalog.FOLDER_NAME)
     }
 
-    // SHA-256 verification
-
-    @Test
-    fun `computeSha256 returns correct hash for known content`() {
-        val file = tempFolder.newFile("test.bin")
-        file.writeBytes("hello world".toByteArray())
-        val expected = MessageDigest.getInstance("SHA-256")
-            .digest("hello world".toByteArray())
-            .joinToString("") { "%02x".format(it) }
-        assertEquals(expected, ModelDownloader.computeSha256(file))
+    private fun writeCatalogInstall(id: String) {
+        val dir = File(modelsDir, id).apply { mkdirs() }
+        val names = ModelDownloader.requiredFileNames(id)
+        names.forEach { File(dir, it).writeBytes(byteArrayOf(1)) }
     }
 
+    // Install layout
+
     @Test
-    fun `verifyArchiveSha256 succeeds for matching hash`() {
-        val file = tempFolder.newFile("archive.zip")
-        file.writeBytes(byteArrayOf(1, 2, 3, 4))
-        val hash = ModelDownloader.computeSha256(file)
-        assertTrue(ModelDownloader.verifyArchiveSha256(file, hash))
+    fun `catalog install is not installed when a file is missing`() {
+        val dir = File(modelsDir, "tiny.en").apply { mkdirs() }
+        File(dir, "tiny.en-encoder.int8.onnx").writeBytes(byteArrayOf(1))
+        File(dir, "tiny.en-decoder.int8.onnx").writeBytes(byteArrayOf(1))
+        // tokens.txt missing
+        assertNull(ModelDownloader.resolvePathsIn(modelsDir, "tiny.en"))
+        assertFalse(ModelDownloader.isInstalledDir(modelsDir, "tiny.en"))
     }
 
     @Test
-    fun `verifyArchiveSha256 fails for mismatched hash`() {
-        val file = tempFolder.newFile("archive.zip")
-        file.writeBytes(byteArrayOf(1, 2, 3, 4))
-        assertFalse(ModelDownloader.verifyArchiveSha256(file, "0".repeat(64)))
+    fun `catalog install is not installed when a file is empty`() {
+        val dir = File(modelsDir, "base.en").apply { mkdirs() }
+        File(dir, "base.en-encoder.int8.onnx").writeBytes(byteArrayOf(1))
+        File(dir, "base.en-decoder.int8.onnx").writeBytes(byteArrayOf())
+        File(dir, "base.en-tokens.txt").writeBytes(byteArrayOf(1))
+        assertNull(ModelDownloader.resolvePathsIn(modelsDir, "base.en"))
+    }
+
+    @Test
+    fun `complete catalog install resolves all three paths`() {
+        writeCatalogInstall("small.en")
+        val paths = ModelDownloader.resolvePathsIn(modelsDir, "small.en")
+        assertNotNull(paths)
+        val (encoder, decoder, tokens) = paths!!
+        assertEquals("small.en-encoder.int8.onnx", encoder.name)
+        assertEquals("small.en-decoder.int8.onnx", decoder.name)
+        assertEquals("small.en-tokens.txt", tokens.name)
+    }
+
+    @Test
+    fun `unknown id never resolves`() {
+        writeCatalogInstall("tiny.en")
+        assertNull(ModelDownloader.resolvePathsIn(modelsDir, "nope"))
     }
 
     // Flat extraction
@@ -92,176 +106,162 @@ class ModelDownloaderTest {
         assertTrue(File(dest, "file.onnx").isFile)
     }
 
-    // Required files verification
+    // Import
 
     @Test
-    fun `verifyRequiredFiles fails when files missing`() {
-        modelDir.mkdirs()
-        // Create only some required files
-        File(modelDir, "Whisper_initializer.onnx").writeBytes(byteArrayOf(1))
-        val missing = ModelDownloader.verifyRequiredFiles(modelDir)
-        assertTrue("Should report missing files", missing.isNotEmpty())
+    fun `import zip with catalog-prefixed files installs to that model id`() {
+        val zip = createZip(
+            "tiny.en-encoder.int8.onnx" to "enc",
+            "tiny.en-decoder.int8.onnx" to "dec",
+            "tiny.en-tokens.txt" to "tok"
+        )
+        val result = installImportZip(zip, modelsDir)
+        assertTrue("import should succeed", result is ModelDownloader.Result.Success)
+        assertEquals("tiny.en", (result as ModelDownloader.Result.Success).modelId)
+        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "tiny.en"))
+        assertFalse("part zip should be cleaned up", zip.exists())
     }
 
     @Test
-    fun `verifyRequiredFiles succeeds when all present and non-empty`() {
-        modelDir.mkdirs()
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(modelDir, name).writeBytes(byteArrayOf(1, 2, 3))
-        }
-        val missing = ModelDownloader.verifyRequiredFiles(modelDir)
-        assertTrue("Should have no missing files", missing.isEmpty())
+    fun `import zip without catalog prefix installs to import slot`() {
+        val zip = createZip(
+            "my-model-encoder.int8.onnx" to "enc",
+            "my-model-decoder.int8.onnx" to "dec",
+            "my-model-tokens.txt" to "tok"
+        )
+        val result = installImportZip(zip, modelsDir)
+        assertTrue("import should succeed", result is ModelDownloader.Result.Success)
+        assertEquals(
+            ModelCatalog.IMPORT_ID,
+            (result as ModelDownloader.Result.Success).modelId
+        )
+        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, ModelCatalog.IMPORT_ID))
     }
 
     @Test
-    fun `verifyRequiredFiles fails for empty files`() {
-        modelDir.mkdirs()
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(modelDir, name).writeBytes(byteArrayOf())
-        }
-        val missing = ModelDownloader.verifyRequiredFiles(modelDir)
-        assertTrue("Empty files should be reported as missing", missing.isNotEmpty())
+    fun `import accepts non-int8 encoder and decoder names`() {
+        val zip = createZip(
+            "model-encoder.onnx" to "enc",
+            "model-decoder.onnx" to "dec",
+            "model-tokens.txt" to "tok"
+        )
+        val result = installImportZip(zip, modelsDir)
+        assertTrue("import should succeed", result is ModelDownloader.Result.Success)
+        assertEquals(ModelCatalog.IMPORT_ID, (result as ModelDownloader.Result.Success).modelId)
+        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, ModelCatalog.IMPORT_ID))
     }
 
-    // Safe install (atomic replacement)
+    @Test
+    fun `incomplete zip fails and does not delete other model dirs`() {
+        writeCatalogInstall("tiny.en")
+
+        val zip = createZip("tiny.en-encoder.int8.onnx" to "only-encoder")
+        val result = installImportZip(zip, modelsDir)
+        assertTrue("incomplete zip should fail", result is ModelDownloader.Result.Error)
+
+        // The previously installed model is untouched.
+        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "tiny.en"))
+        assertEquals(
+            1.toByte(),
+            File(File(modelsDir, "tiny.en"), "tiny.en-encoder.int8.onnx").readBytes()[0]
+        )
+    }
 
     @Test
-    fun `safeInstall replaces only after full verification`() {
-        // Set up existing valid model
-        modelDir.mkdirs()
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(modelDir, name).writeBytes(byteArrayOf(1))
-        }
-        val existingMarker = File(modelDir, "marker.txt")
-        existingMarker.writeText("old")
+    fun `failed import keeps existing install of the same id intact`() {
+        writeCatalogInstall("base.en")
+        val zip = createZip("base.en-encoder.int8.onnx" to "only")
+        val result = installImportZip(zip, modelsDir)
+        assertTrue(result is ModelDownloader.Result.Error)
+        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "base.en"))
+    }
 
-        // Create staging dir with new valid model
+    @Test
+    fun `resolvePaths for import prefers int8 encoder over plain onnx`() {
+        val dir = File(modelsDir, ModelCatalog.IMPORT_ID).apply { mkdirs() }
+        File(dir, "model-encoder.onnx").writeBytes(byteArrayOf(1))
+        File(dir, "model-encoder.int8.onnx").writeBytes(byteArrayOf(2))
+        File(dir, "model-decoder.int8.onnx").writeBytes(byteArrayOf(1))
+        File(dir, "model-tokens.txt").writeBytes(byteArrayOf(1))
+        val paths = ModelDownloader.resolvePathsIn(modelsDir, ModelCatalog.IMPORT_ID)
+        assertNotNull(paths)
+        assertEquals("model-encoder.int8.onnx", paths!!.first.name)
+    }
+
+    // Legacy purge
+
+    @Test
+    fun `purgeLegacyInstall removes the legacy RTranslator folder`() {
+        val legacy = File(modelsDir, ModelCatalog.LEGACY_FOLDER).apply { mkdirs() }
+        File(legacy, "Whisper_encoder.onnx").writeBytes(byteArrayOf(1))
+        File(legacy, "Whisper_decoder.onnx").writeBytes(byteArrayOf(1))
+
+        ModelDownloader.purgeLegacyDir(modelsDir)
+        assertFalse("Legacy folder should be gone", legacy.exists())
+    }
+
+    @Test
+    fun `purgeLegacyInstall is a no-op when the folder is absent`() {
+        ModelDownloader.purgeLegacyDir(modelsDir)
+        assertTrue(modelsDir.exists())
+    }
+
+    // Safe install
+
+    @Test
+    fun `safeInstall replaces existing install only after verification`() {
+        val target = File(modelsDir, "base.en")
+        writeCatalogInstall("base.en")
+        File(target, "marker.txt").writeText("old")
+
         val staging = tempFolder.newFolder("staging")
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(staging, name).writeBytes(byteArrayOf(2))
-        }
+        val names = ModelDownloader.requiredFileNames("base.en")
+        names.forEach { File(staging, it).writeBytes(byteArrayOf(2)) }
 
-        val result = ModelDownloader.safeInstall(staging, modelDir)
+        val result = ModelDownloader.safeInstall(staging, target, names)
         assertTrue("safeInstall should succeed", result.isSuccess)
-
-        // Verify new content
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            assertEquals(2.toByte(), File(modelDir, name).readBytes()[0])
-        }
-        // Old marker should be gone (replaced)
-        assertFalse("Old files should be cleaned", existingMarker.exists())
+        assertFalse("old marker should be gone", File(target, "marker.txt").exists())
+        assertEquals(2.toByte(), File(target, names[0]).readBytes()[0])
     }
 
     @Test
-    fun `safeInstall preserves old model when staging is invalid`() {
-        // Set up existing valid model
-        modelDir.mkdirs()
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(modelDir, name).writeBytes(byteArrayOf(1))
-        }
+    fun `safeInstall preserves old model when staging is incomplete`() {
+        val target = File(modelsDir, "base.en")
+        writeCatalogInstall("base.en")
 
-        // Create staging dir with incomplete model
         val staging = tempFolder.newFolder("staging")
-        File(staging, "Whisper_initializer.onnx").writeBytes(byteArrayOf(2))
+        val names = ModelDownloader.requiredFileNames("base.en")
+        File(staging, names[0]).writeBytes(byteArrayOf(2))
 
-        val result = ModelDownloader.safeInstall(staging, modelDir)
+        val result = ModelDownloader.safeInstall(staging, target, names)
         assertTrue("safeInstall should fail", result.isFailure)
-
-        // Verify old model is intact
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            assertEquals(1.toByte(), File(modelDir, name).readBytes()[0])
-        }
+        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "base.en"))
+        assertEquals(1.toByte(), File(target, names[0]).readBytes()[0])
     }
 
     @Test
     fun `safeInstall cleans staging dir on failure`() {
-        modelDir.mkdirs()
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(modelDir, name).writeBytes(byteArrayOf(1))
-        }
+        val target = File(modelsDir, "base.en")
+        writeCatalogInstall("base.en")
 
         val staging = tempFolder.newFolder("staging")
-        File(staging, "Whisper_initializer.onnx").writeBytes(byteArrayOf(2))
+        val names = ModelDownloader.requiredFileNames("base.en")
+        File(staging, names[0]).writeBytes(byteArrayOf(2))
 
-        ModelDownloader.safeInstall(staging, modelDir)
-        assertFalse("Staging dir should be cleaned up", staging.exists())
+        ModelDownloader.safeInstall(staging, target, names)
+        assertFalse("staging dir should be cleaned up", staging.exists())
     }
 
     @Test
-    fun `safeInstall cleans temp dir on exception`() {
-        modelDir.mkdirs()
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(modelDir, name).writeBytes(byteArrayOf(1))
-        }
+    fun `safeInstall fails gracefully on non-directory staging`() {
+        val target = File(modelsDir, "base.en")
+        writeCatalogInstall("base.en")
 
-        // Pass a non-directory as staging to trigger an error
         val badStaging = tempFolder.newFile("notadir")
-        val result = ModelDownloader.safeInstall(badStaging, modelDir)
-        assertTrue("Should fail gracefully", result.isFailure)
-    }
-
-    // Shared install pipeline (installModelZip)
-
-    private fun createValidZip(): File = createZip(
-        "Whisper_initializer.onnx" to "1",
-        "Whisper_encoder.onnx" to "2",
-        "Whisper_decoder.onnx" to "3",
-        "Whisper_cache_initializer.onnx" to "4",
-        "Whisper_cache_initializer_batch.onnx" to "5",
-        "Whisper_detokenizer.onnx" to "6"
-    )
-
-    @Test
-    fun `installModelZip succeeds and installs required files`() {
-        val zip = createValidZip()
-        val result = installModelZip(zip, modelsDir, modelDir)
-        assertTrue("installModelZip should succeed", result is ModelDownloader.Result.Success)
-        assertTrue(
-            "Required files should be installed",
-            ModelDownloader.verifyRequiredFiles(modelDir).isEmpty()
-        )
-        assertFalse("Part zip should be cleaned up", zip.exists())
-    }
-
-    @Test
-    fun `installModelZip preserves existing model when zip incomplete`() {
-        modelDir.mkdirs()
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(modelDir, name).writeBytes(byteArrayOf(1))
-        }
-        val zip = createZip("Whisper_initializer.onnx" to "only-one-file")
-        val result = installModelZip(zip, modelsDir, modelDir)
-        assertTrue("installModelZip should fail", result is ModelDownloader.Result.Error)
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            assertEquals(1.toByte(), File(modelDir, name).readBytes()[0])
-        }
-    }
-
-    @Test
-    fun `installModelZip preserves existing model when sessionValidator fails`() {
-        modelDir.mkdirs()
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            File(modelDir, name).writeBytes(byteArrayOf(1))
-        }
-        val zip = createValidZip()
-        val result = installModelZip(zip, modelsDir, modelDir) {
-            throw IllegalStateException("sessions broken")
-        }
-        assertTrue("installModelZip should fail", result is ModelDownloader.Result.Error)
-        for (name in ModelDownloader.REQUIRED_BASENAMES) {
-            assertEquals(1.toByte(), File(modelDir, name).readBytes()[0])
-        }
-    }
-
-    @Test
-    fun `installModelZip invokes sessionValidator after extract`() {
-        val zip = createValidZip()
-        var sawExtractedFile = false
-        val result = installModelZip(zip, modelsDir, modelDir) { dir ->
-            sawExtractedFile = File(dir, "Whisper_initializer.onnx").isFile
-        }
-        assertTrue("installModelZip should succeed", result is ModelDownloader.Result.Success)
-        assertTrue("sessionValidator should see extracted files", sawExtractedFile)
+        val names = ModelDownloader.requiredFileNames("base.en")
+        val result = ModelDownloader.safeInstall(badStaging, target, names)
+        assertTrue("should fail gracefully", result.isFailure)
+        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "base.en"))
     }
 
     // Helpers

@@ -1,16 +1,17 @@
 WhisperType Keyboard
 Copyright (c) 2026 Trion129
 
-This product uses ONNX Runtime:
+This product uses sherpa-onnx:
+  https://github.com/k2-fsa/sherpa-onnx
+  Copyright (c) k2-fsa
+  Licensed under the Apache License, Version 2.0
+
+sherpa-onnx bundles a copy of ONNX Runtime for its native inference:
   https://onnxruntime.ai/
   Copyright (c) Microsoft Corporation
   Licensed under the MIT License
 
-This product uses ONNX Runtime Extensions:
-  https://github.com/microsoft/onnxruntime-extensions
-  Copyright (c) Microsoft Corporation
-  Licensed under the MIT License
-
-The Whisper Small English model is downloaded on demand from:
-  https://huggingface.co/DocWolle/whisperOnnx
-  Licensed under the Apache License, Version 2.0
+The Whisper models (tiny.en / base.en / small.en, int8) are downloaded on
+demand from the official Hugging Face packs:
+  https://huggingface.co/csukuangfj/sherpa-onnx-whisper-{id}
+  OpenAI Whisper weights are licensed under the MIT License

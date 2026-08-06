@@ -17,6 +17,9 @@ AutoName: WhisperType
 RepoType: git
 Repo: https://github.com/Trion129/WhisperTypeKeyboard
 
+# Draft note: the app is now at 1.4.0 (versionCode 8) with a sherpa-onnx
+# ASR backend resolved from JitPack. Update the Builds entry below and
+# CurrentVersion / CurrentVersionCode when filing the fdroiddata MR.
 Builds:
   - versionName: 1.2.0
     versionCode: 5
