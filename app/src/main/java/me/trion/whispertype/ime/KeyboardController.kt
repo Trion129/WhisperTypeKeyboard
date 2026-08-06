@@ -138,6 +138,7 @@ class KeyboardController(
                 textSize = when (key.type) {
                     KeyType.SPACE -> 14f
                     KeyType.MODE_123, KeyType.MODE_ABC, KeyType.MODE_SYMBOLS -> 13f
+                    KeyType.MODE_EMOJI -> 16f
                     else -> 18f
                 }
                 setTextColor(ContextCompat.getColor(context, R.color.key_text))
@@ -155,7 +156,7 @@ class KeyboardController(
             when (key.type) {
                 KeyType.MIC -> R.drawable.key_background_mic
                 KeyType.ENTER -> R.drawable.key_background_action
-                KeyType.SHIFT, KeyType.BACKSPACE, KeyType.MODE_123, KeyType.MODE_ABC, KeyType.MODE_SYMBOLS ->
+                KeyType.SHIFT, KeyType.BACKSPACE, KeyType.MODE_123, KeyType.MODE_ABC, KeyType.MODE_SYMBOLS, KeyType.MODE_EMOJI ->
                     R.drawable.key_background_special
                 else -> R.drawable.key_background
             }
@@ -261,6 +262,10 @@ class KeyboardController(
             }
             KeyType.MODE_123 -> {
                 mode = KeyboardLayout.Mode.NUMBERS
+                rebuildKeys()
+            }
+            KeyType.MODE_EMOJI -> {
+                mode = KeyboardLayout.Mode.EMOJI
                 rebuildKeys()
             }
             KeyType.MODE_SYMBOLS -> {

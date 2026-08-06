@@ -9,6 +9,7 @@ enum class KeyType {
     MODE_ABC,
     MODE_123,
     MODE_SYMBOLS,
+    MODE_EMOJI,
     MIC,
     COMMA,
     PERIOD
@@ -25,7 +26,7 @@ data class KeyDef(
 )
 
 object KeyboardLayout {
-    enum class Mode { LETTERS, NUMBERS, SYMBOLS }
+    enum class Mode { LETTERS, NUMBERS, SYMBOLS, EMOJI }
 
     val letters: List<List<KeyDef>> = listOf(
         listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p").map { c ->
@@ -43,9 +44,10 @@ object KeyboardLayout {
         ),
         listOf(
             KeyDef(KeyType.MODE_123, "?123", weight = 1.4f),
+            KeyDef(KeyType.MODE_EMOJI, "😀", weight = 1.2f),
             KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
             KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
-            KeyDef(KeyType.SPACE, "space", weight = 4.2f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
+            KeyDef(KeyType.SPACE, "space", weight = 3.0f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
             KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
             KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
         )
@@ -110,9 +112,33 @@ object KeyboardLayout {
         )
     )
 
+    val emoji: List<List<KeyDef>> = listOf(
+        listOf("😀", "😂", "🥰", "😍", "🤔", "😎", "😭", "😡", "👍", "👎").map {
+            KeyDef(KeyType.CHAR, it)
+        },
+        listOf("❤️", "🔥", "✨", "🎉", "🙏", "👏", "💪", "🤝", "👀", "💯").map {
+            KeyDef(KeyType.CHAR, it)
+        },
+        listOf(
+            *listOf("🚀", "🌟", "💡", "✅", "❌", "🎵", "📷", "☕", "🍕").map {
+                KeyDef(KeyType.CHAR, it)
+            }.toTypedArray(),
+            KeyDef(KeyType.BACKSPACE, "⌫", weight = 1.4f, icon = true)
+        ),
+        listOf(
+            KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
+            KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
+            KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
+            KeyDef(KeyType.SPACE, "space", weight = 3.0f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
+            KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
+            KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
+        )
+    )
+
     fun rowsFor(mode: Mode): List<List<KeyDef>> = when (mode) {
         Mode.LETTERS -> letters
         Mode.NUMBERS -> numbers
         Mode.SYMBOLS -> symbols
+        Mode.EMOJI -> emoji
     }
 }

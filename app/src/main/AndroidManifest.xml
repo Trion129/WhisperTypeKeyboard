@@ -17,7 +17,8 @@
         <activity
             android:name=".settings.SetupActivity"
             android:exported="true"
-            android:theme="@style/Theme.WhisperType">
+            android:theme="@style/Theme.WhisperType"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
