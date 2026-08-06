@@ -57,6 +57,7 @@ class KeyboardController(
     private var micButton: View? = null
     private var deleteJob: Runnable? = null
     private var transcribeJob: Job? = null
+    private var activePopup: PopupWindow? = null
 
     private enum class ShiftState { OFF, ONCE, LOCKED }
 
@@ -80,6 +81,8 @@ class KeyboardController(
     fun destroy() {
         deleteJob?.let { mainHandler.removeCallbacks(it) }
         transcribeJob?.cancel()
+        activePopup?.dismiss()
+        activePopup = null
         recorder.cancel()
         asr.release()
     }
@@ -291,6 +294,7 @@ class KeyboardController(
         view.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    activePopup?.dismiss()
                     longPressed = false
                     v.isPressed = true
                     v.postDelayed(longPressRunnable, 300)
@@ -308,6 +312,8 @@ class KeyboardController(
                 MotionEvent.ACTION_CANCEL -> {
                     v.removeCallbacks(longPressRunnable)
                     v.isPressed = false
+                    // leave popup if open (user might move) - or dismiss:
+                    // optional: don't dismiss on cancel from key
                     true
                 }
                 else -> false
@@ -316,50 +322,62 @@ class KeyboardController(
     }
 
     private fun showPopupWindow(anchor: View, key: KeyDef): PopupWindow {
+        activePopup?.dismiss()
+        activePopup = null
+
         val density = context.resources.displayMetrics.density
+        val gap = (8 * density).toInt()
 
         val popupContent = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding((8 * density).toInt(), (8 * density).toInt(), (8 * density).toInt(), (8 * density).toInt())
             setBackgroundColor(ContextCompat.getColor(context, R.color.keyboard_bg))
-            setElevation(6f * density)
+            elevation = 6f * density
         }
 
         key.popupLabels.forEach { label ->
-            val btn = Button(context).apply {
+            val btn = TextView(context).apply {  // TextView not Button - Buttons can request focus
                 text = label
                 textSize = 18f
+                gravity = android.view.Gravity.CENTER
                 setTextColor(ContextCompat.getColor(context, R.color.key_text))
-                setPadding((12 * density).toInt(), 0, (12 * density).toInt(), 0)
-                minimumWidth = 0
-                minimumHeight = 0
-                stateListAnimator = null
-                elevation = 0f
+                setPadding((14 * density).toInt(), (10 * density).toInt(), (14 * density).toInt(), (10 * density).toInt())
                 background = ContextCompat.getDrawable(context, R.drawable.key_background)
+                isClickable = true
+                isFocusable = false
             }
-            popupContent.addView(btn, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                (44 * density).toInt()
-            ).apply { setMargins((3 * density).toInt(), 0, (3 * density).toInt(), 0) })
+            popupContent.addView(
+                btn,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (44 * density).toInt()
+                ).apply { setMargins((3 * density).toInt(), 0, (3 * density).toInt(), 0) }
+            )
         }
 
         popupContent.measure(
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         )
+        val pw = popupContent.measuredWidth
+        val ph = popupContent.measuredHeight
 
-        val popup = PopupWindow(
-            popupContent,
-            popupContent.measuredWidth,
-            popupContent.measuredHeight,
-            true
-        )
-        popup.elevation = 6f * density
+        // focusable = false  <<< critical for IME
+        val popup = PopupWindow(popupContent, pw, ph, /* focusable */ false).apply {
+            isOutsideTouchable = true
+            isTouchable = true
+            inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED
+            isClippingEnabled = false
+            elevation = 6f * density
+            // Required so outsideTouchable works:
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setOnDismissListener { if (activePopup === this) activePopup = null }
+        }
 
         for (i in 0 until popupContent.childCount) {
-            val btn = popupContent.getChildAt(i) as Button
+            val child = popupContent.getChildAt(i)
             val label = key.popupLabels[i]
-            btn.setOnClickListener {
+            child.setOnClickListener {
                 performHaptic()
                 commitPopupText(label)
                 anchor.isPressed = false
@@ -367,13 +385,14 @@ class KeyboardController(
             }
         }
 
-        val gap = (8 * density).toInt()
-        val xOff = (anchor.width - popupContent.measuredWidth) / 2
-        val yOff = -(anchor.height + popupContent.measuredHeight + gap)
-        // Ensure popup can draw above the key (default may clip)
-        popup.isClippingEnabled = false
-        popup.showAsDropDown(anchor, xOff, yOff)
+        // Position in IME window coords (not screen) - more stable for InputMethodService
+        val anchorLoc = IntArray(2)
+        anchor.getLocationInWindow(anchorLoc)
+        val x = anchorLoc[0] + (anchor.width - pw) / 2
+        val y = anchorLoc[1] - ph - gap
+        popup.showAtLocation(root, android.view.Gravity.NO_GRAVITY, x, y)
 
+        activePopup = popup
         return popup
     }
 
