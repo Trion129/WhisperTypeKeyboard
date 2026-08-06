@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
-import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -349,7 +348,12 @@ class KeyboardController(
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         )
 
-        val popup = PopupWindow(popupContent, LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT, true)
+        val popup = PopupWindow(
+            popupContent,
+            popupContent.measuredWidth,
+            popupContent.measuredHeight,
+            true
+        )
         popup.elevation = 6f * density
 
         for (i in 0 until popupContent.childCount) {
@@ -363,9 +367,12 @@ class KeyboardController(
             }
         }
 
-        val loc = IntArray(2)
-        anchor.getLocationOnScreen(loc)
-        popup.showAtLocation(anchor, Gravity.NO_GRAVITY, loc[0], loc[1] - popupContent.measuredHeight - (8 * density).toInt())
+        val gap = (8 * density).toInt()
+        val xOff = (anchor.width - popupContent.measuredWidth) / 2
+        val yOff = -(anchor.height + popupContent.measuredHeight + gap)
+        // Ensure popup can draw above the key (default may clip)
+        popup.isClippingEnabled = false
+        popup.showAsDropDown(anchor, xOff, yOff)
 
         return popup
     }
