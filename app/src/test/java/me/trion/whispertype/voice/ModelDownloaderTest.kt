@@ -200,6 +200,70 @@ class ModelDownloaderTest {
         assertTrue("Should fail gracefully", result.isFailure)
     }
 
+    // Shared install pipeline (installModelZip)
+
+    private fun createValidZip(): File = createZip(
+        "Whisper_initializer.onnx" to "1",
+        "Whisper_encoder.onnx" to "2",
+        "Whisper_decoder.onnx" to "3",
+        "Whisper_cache_initializer.onnx" to "4",
+        "Whisper_cache_initializer_batch.onnx" to "5",
+        "Whisper_detokenizer.onnx" to "6"
+    )
+
+    @Test
+    fun `installModelZip succeeds and installs required files`() {
+        val zip = createValidZip()
+        val result = installModelZip(zip, modelsDir, modelDir)
+        assertTrue("installModelZip should succeed", result is ModelDownloader.Result.Success)
+        assertTrue(
+            "Required files should be installed",
+            ModelDownloader.verifyRequiredFiles(modelDir).isEmpty()
+        )
+        assertFalse("Part zip should be cleaned up", zip.exists())
+    }
+
+    @Test
+    fun `installModelZip preserves existing model when zip incomplete`() {
+        modelDir.mkdirs()
+        for (name in ModelDownloader.REQUIRED_BASENAMES) {
+            File(modelDir, name).writeBytes(byteArrayOf(1))
+        }
+        val zip = createZip("Whisper_initializer.onnx" to "only-one-file")
+        val result = installModelZip(zip, modelsDir, modelDir)
+        assertTrue("installModelZip should fail", result is ModelDownloader.Result.Error)
+        for (name in ModelDownloader.REQUIRED_BASENAMES) {
+            assertEquals(1.toByte(), File(modelDir, name).readBytes()[0])
+        }
+    }
+
+    @Test
+    fun `installModelZip preserves existing model when sessionValidator fails`() {
+        modelDir.mkdirs()
+        for (name in ModelDownloader.REQUIRED_BASENAMES) {
+            File(modelDir, name).writeBytes(byteArrayOf(1))
+        }
+        val zip = createValidZip()
+        val result = installModelZip(zip, modelsDir, modelDir) {
+            throw IllegalStateException("sessions broken")
+        }
+        assertTrue("installModelZip should fail", result is ModelDownloader.Result.Error)
+        for (name in ModelDownloader.REQUIRED_BASENAMES) {
+            assertEquals(1.toByte(), File(modelDir, name).readBytes()[0])
+        }
+    }
+
+    @Test
+    fun `installModelZip invokes sessionValidator after extract`() {
+        val zip = createValidZip()
+        var sawExtractedFile = false
+        val result = installModelZip(zip, modelsDir, modelDir) { dir ->
+            sawExtractedFile = File(dir, "Whisper_initializer.onnx").isFile
+        }
+        assertTrue("installModelZip should succeed", result is ModelDownloader.Result.Success)
+        assertTrue("sessionValidator should see extracted files", sawExtractedFile)
+    }
+
     // Helpers
 
     private fun createZip(vararg entries: Pair<String, String?>): File {

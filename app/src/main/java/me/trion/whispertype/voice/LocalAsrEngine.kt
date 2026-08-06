@@ -2,6 +2,7 @@ package me.trion.whispertype.voice
 
 import android.content.Context
 import android.util.Log
+import me.trion.whispertype.util.Prefs
 import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
@@ -30,7 +31,14 @@ class LocalAsrEngine(private val context: Context) {
     }
 
     fun isModelReady(): Boolean = downloader.isInstalled()
-    fun currentModelTitle(): String = ModelCatalog.MODEL_TITLE
+
+    fun currentModelTitle(): String {
+        val prefs = Prefs(context)
+        return when (prefs.modelSource) {
+            Prefs.MODEL_SOURCE_IMPORT -> "Imported model"
+            else -> ModelCatalog.MODEL_TITLE
+        }
+    }
 
     fun transcribeWav(wavFile: File): Result = synchronized(engineLock) {
         val loadError = ensureLoaded()

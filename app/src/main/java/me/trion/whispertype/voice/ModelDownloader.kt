@@ -1,18 +1,68 @@
 package me.trion.whispertype.voice
 
+import ai.onnxruntime.OrtSession
+import ai.onnxruntime.extensions.OrtxPackage
 import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
-class ModelDownloader(private val context: Context) {
+/**
+ * Shared install pipeline used by both download and import: extract the zip
+ * into a staging dir, verify required files, validate sessions, then swap in
+ * via safeInstall. Never touches the live model dir until safeInstall, and
+ * never changes prefs. The caller is responsible for setting model_source.
+ */
+internal fun installModelZip(
+    zipFile: File,
+    modelsDir: File,
+    modelDir: File,
+    sessionValidator: (File) -> Unit = {},
+): ModelDownloader.Result {
+    val staging = File(modelsDir, ModelCatalog.FOLDER_NAME + ".staging")
+    try {
+        staging.deleteRecursively()
+        staging.mkdirs()
+        try {
+            ModelDownloader.extractZipFlat(zipFile, staging)
+        } catch (e: Exception) {
+            return ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_READ)
+        }
+
+        val missing = ModelDownloader.verifyRequiredFiles(staging)
+        if (missing.isNotEmpty()) {
+            return ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_INVALID)
+        }
+
+        try {
+            sessionValidator(staging)
+        } catch (e: Exception) {
+            return ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_LOAD)
+        }
+
+        return ModelDownloader.safeInstall(staging, modelDir).fold(
+            onSuccess = { ModelDownloader.Result.Success },
+            onFailure = { ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_IO) }
+        )
+    } finally {
+        if (staging.exists()) staging.deleteRecursively()
+        zipFile.delete()
+    }
+}
+
+class ModelDownloader(
+    private val context: Context,
+    private val sessionValidator: (File) -> Unit = Companion::validateSessions,
+) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
@@ -70,36 +120,55 @@ class ModelDownloader(private val context: Context) {
                     )
                 }
 
-                val staging = File(modelsDir(), ModelCatalog.FOLDER_NAME + ".staging")
-                try {
-                    staging.deleteRecursively()
-                    staging.mkdirs()
-                    extractZipFlat(tmpZip, staging)
-
-                    val missing = verifyRequiredFiles(staging)
-                    if (missing.isNotEmpty()) {
-                        staging.deleteRecursively()
-                        tmpZip.delete()
-                        return@withContext Result.Error("Model files missing after extract: $missing")
-                    }
-
-                    safeInstall(staging, modelDir()).getOrThrow()
-                    tmpZip.delete()
-                    Result.Success
-                } catch (e: Exception) {
-                    staging.deleteRecursively()
-                    tmpZip.delete()
-                    throw e
-                }
+                installModelZip(tmpZip, modelsDir(), modelDir(), sessionValidator)
             } catch (e: Exception) {
                 File(modelsDir(), ModelCatalog.ARCHIVE_NAME + ".part").delete()
                 Result.Error(e.message ?: "Download failed")
             }
         }
 
+    suspend fun importFromUri(uri: Uri, onProgress: (copied: Long, total: Long) -> Unit): Result =
+        withContext(Dispatchers.IO) {
+            val partFile = File(modelsDir(), "import.zip.part")
+            try {
+                val resolver = context.contentResolver
+                val total = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                val input = try {
+                    resolver.openInputStream(uri)
+                        ?: return@withContext Result.Error(MSG_IMPORT_READ)
+                } catch (e: Exception) {
+                    partFile.delete()
+                    return@withContext Result.Error(MSG_IMPORT_READ)
+                }
+                try {
+                    input.use { stream ->
+                        FileOutputStream(partFile).use { out ->
+                            val buffer = ByteArray(64 * 1024)
+                            var copied = 0L
+                            while (true) {
+                                val read = stream.read(buffer)
+                                if (read < 0) break
+                                out.write(buffer, 0, read)
+                                copied += read
+                                onProgress(copied, total)
+                            }
+                        }
+                    }
+                } catch (e: IOException) {
+                    partFile.delete()
+                    return@withContext Result.Error(MSG_IMPORT_IO)
+                }
+                installModelZip(partFile, modelsDir(), modelDir(), sessionValidator)
+            } catch (e: Exception) {
+                partFile.delete()
+                Result.Error(MSG_IMPORT_READ)
+            }
+        }
+
     fun delete() {
         modelDir().deleteRecursively()
         File(modelsDir(), ModelCatalog.ARCHIVE_NAME + ".part").delete()
+        File(modelsDir(), "import.zip.part").delete()
     }
 
     sealed class Result {
@@ -118,6 +187,21 @@ class ModelDownloader(private val context: Context) {
             "Whisper_detokenizer.onnx"
         )
 
+        // The files WhisperEngine actually loads at runtime
+        // (cache_initializer_batch is required for install but never loaded).
+        val SESSION_BASENAMES = listOf(
+            "Whisper_initializer.onnx",
+            "Whisper_encoder.onnx",
+            "Whisper_decoder.onnx",
+            "Whisper_cache_initializer.onnx",
+            "Whisper_detokenizer.onnx"
+        )
+
+        const val MSG_IMPORT_READ = "Could not read the selected file"
+        const val MSG_IMPORT_INVALID = "Invalid model package (missing files)"
+        const val MSG_IMPORT_LOAD = "Model files could not be loaded"
+        const val MSG_IMPORT_IO = "Not enough space or write failed"
+
         fun computeSha256(file: File): String {
             val digest = MessageDigest.getInstance("SHA-256")
             file.inputStream().use { input ->
@@ -133,6 +217,36 @@ class ModelDownloader(private val context: Context) {
 
         fun verifyArchiveSha256(file: File, expectedHash: String): Boolean {
             return computeSha256(file).equals(expectedHash, ignoreCase = true)
+        }
+
+        /**
+         * Opens the five runtime sessions exactly like WhisperEngine does
+         * (including the custom-op library and encoder options) and closes
+         * them all. Throws if any session fails to open.
+         */
+        fun validateSessions(dir: File) {
+            val opts = OrtSession.SessionOptions().apply {
+                registerCustomOpLibrary(OrtxPackage.getLibraryPath())
+                setCPUArenaAllocator(false)
+                setMemoryPatternOptimization(false)
+                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT)
+            }
+            val encOpts = OrtSession.SessionOptions().apply {
+                registerCustomOpLibrary(OrtxPackage.getLibraryPath())
+                setCPUArenaAllocator(false)
+                setMemoryPatternOptimization(false)
+                setSymbolicDimensionValue("batch_size", 1)
+                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT)
+            }
+            val opened = mutableListOf<OrtSession>()
+            try {
+                for (name in SESSION_BASENAMES) {
+                    val fileOpts = if (name == "Whisper_encoder.onnx") encOpts else opts
+                    opened.add(OnnxRuntime.loadSession(File(dir, name), fileOpts))
+                }
+            } finally {
+                opened.forEach { session -> runCatching { session.close() } }
+            }
         }
 
         fun extractZipFlat(zipFile: File, destDir: File) {

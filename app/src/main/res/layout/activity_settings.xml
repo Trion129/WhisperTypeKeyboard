@@ -32,7 +32,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
-            android:text="Whisper Small runs fully offline. Model downloaded from HuggingFace."
+            android:text="Whisper Small runs fully offline. Download from HuggingFace or import a compatible ONNX zip."
             android:textColor="@color/key_text_secondary"
             android:textSize="13sp" />
 
@@ -57,6 +57,14 @@
                 android:layout_marginEnd="6dp"
                 android:layout_weight="1"
                 android:text="Download" />
+
+            <Button
+                android:id="@+id/btn_import"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:text="@string/btn_import_model" />
 
             <Button
                 android:id="@+id/btn_delete"

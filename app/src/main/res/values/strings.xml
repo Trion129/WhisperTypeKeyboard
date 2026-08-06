@@ -29,4 +29,14 @@
     <string name="error_mic_permission">Microphone permission required</string>
     <string name="error_transcription">Transcription failed</string>
     <string name="error_no_audio">No speech detected</string>
+    <string name="btn_import_model">Import</string>
+    <string name="model_status_not_installed">Not installed</string>
+    <string name="model_status_downloaded">Installed &#8212; %1$s</string>
+    <string name="model_status_imported">Imported model</string>
+    <string name="model_importing">Importing&#8230;</string>
+    <string name="toast_model_ready">Model ready!</string>
+    <string name="error_import_read">Could not read the selected file</string>
+    <string name="error_import_invalid">Invalid model package (missing files)</string>
+    <string name="error_import_load">Model files could not be loaded</string>
+    <string name="error_import_io">Not enough space or write failed</string>
 </resources>
