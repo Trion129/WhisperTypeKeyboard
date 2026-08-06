@@ -1,75 +1,64 @@
 # WhisperType Keyboard
 
-Android keyboard with **real QWERTY typing** plus **offline voice dictation**.
+Full QWERTY IME with offline voice dictation for Android.
 
-Unlike dictation-only apps that only show a mic button, WhisperType is a full input method:
-
-- Letters, numbers, symbols
-- Shift / caps lock
-- Space, enter, backspace (hold to repeat)
-- Mic key for on-device speech-to-text
-- Works in any app once enabled as a system keyboard
+Unlike dictation-only apps that just show a mic button, WhisperType is a complete
+input method: type with a real QWERTY keyboard, or tap the mic and dictate -
+all speech recognition runs on-device.
 
 ## Features
 
 | Feature | Details |
-|--------|---------|
-| Typing | Full QWERTY keyboard with `?123` and symbols layers |
-| Voice | Fully offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) |
-| Model | **Whisper Base EN** (int8) by default; tiny.en / base.en / small.en catalog, or import your own package |
-| Privacy | No API keys — audio never leaves the device |
+|---------|---------|
+| Typing | Full QWERTY layout with numbers and symbols layers, shift / caps lock, long-press key alternatives, and an **emoji mode** (`😀` key) |
+| Voice | Fully offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (JitPack) |
+| Models | `tiny.en` / `base.en` (default, ~161 MB) / `small.en` int8; import a custom sherpa Whisper zip; more packs at <https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html> |
+| Privacy | No API keys - audio never leaves the device |
 
 ## Setup
 
-1. Build & install the APK
+1. Install the APK (debug build, or a release from GitHub Releases)
 2. Open **WhisperType**
 3. Enable the keyboard in system settings
 4. Select WhisperType as input method
 5. Grant microphone permission
-6. Open **Download model** and download Base EN (~161 MB, recommended) — or import a sherpa-onnx Whisper zip
-7. Tap mic on the keyboard to dictate offline
+6. In Settings, pick **Base EN** (or another model) and **Download** - or **Import** a sherpa Whisper zip
+7. Tap the mic on the keyboard to dictate offline
 
 ## Usage
 
-1. Focus any text field
-2. **Type** with the keys normally
-3. Tap the **green mic** to start listening
-4. Tap mic again to stop → text is transcribed and inserted
-5. Gear icon opens settings
+Type normally with the keys; tap the **mic** to dictate (tap again to stop and
+insert the text); the **gear** opens settings; **long-press** keys for
+alternatives (e.g. accents); `😀` switches to the emoji layer.
 
 ## Build
 
-Build directly with Gradle; sherpa-onnx is resolved from JitPack:
-
 ```bash
-cd WhisperTypeKeyboard
 ./gradlew assembleDebug
-```
-
-APK:
-
-```
-app/build/outputs/apk/debug/app-debug.apk
-```
-
-Install:
-
-```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Requirements:
 
-- Android Studio / Android SDK
 - JDK 17+
+- Android SDK
 - minSdk 26
+- Network access once at build time for the JitPack sherpa-onnx artifact
+
+Release splits (optional, local):
+
+```bash
+# with KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD set
+./gradlew assembleRelease
+# per-ABI APKs under app/build/outputs/apk/release/
+```
 
 ## Project structure
 
 ```
 app/src/main/java/me/trion/whispertype/
-  ime/          # InputMethodService + keyboard UI
-  voice/        # Audio recorder, model download, local ASR
+  ime/          # InputMethodService + keyboard UI (layouts, emoji, long-press)
+  voice/        # SherpaWhisperEngine, ModelDownloader, model catalog, audio
   settings/     # Setup wizard + model management
   util/         # Preferences
 ```
@@ -77,45 +66,28 @@ app/src/main/java/me/trion/whispertype/
 ## Credits
 
 - On-device ASR runtime: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0), which bundles ONNX Runtime (MIT)
-- Whisper models (tiny.en / base.en / small.en int8) downloaded on demand from the official [csukuangfj/sherpa-onnx-whisper-*](https://huggingface.co/csukuangfj) Hugging Face packs (OpenAI Whisper weights, MIT)
+- Whisper models from the `csukuangfj/sherpa-onnx-whisper-*` packs on [Hugging Face](https://huggingface.co/csukuangfj) (OpenAI Whisper weights, MIT)
+- Docs for extra models: the sherpa Whisper model index linked in Features above
 
 ## F-Droid
 
-Packaging notes and submission steps: [`docs/FDROID.md`](docs/FDROID.md)
+Packaging notes: [`docs/FDROID.md`](docs/FDROID.md)
 
-Draft fdroiddata recipe: [`metadata/me.trion.whispertype.yml`](metadata/me.trion.whispertype.yml)
+fdroiddata recipe draft: [`metadata/me.trion.whispertype.yml`](metadata/me.trion.whispertype.yml)
 
-## Releases (CI)
+The F-Droid MR/process is documented there briefly. Models are downloaded at
+runtime, so the build itself needs no model assets; `NonFreeNet` is noted for
+Hugging Face downloads, and **Import** works fully offline.
 
-GitHub Actions builds signed APK + AAB and publishes a GitHub Release **when you run it**.
+## Releases
 
-### Trigger a release
-
-1. Open **Actions** → **Release**
-2. **Run workflow**
-3. Choose the optional pre-release flag. The workflow reads `versionName` and
-   `versionCode` from the committed `app/build.gradle.kts` file.
-4. Wait for the job; artifacts appear on the Releases page
-
-### Optional production signing
-
-Without secrets, the release APK is **debug-signed** (fine for testers).
-
-For Play Store / production signing, add repo secrets:
-
-| Secret | Description |
-|--------|-------------|
-| `KEYSTORE_BASE64` | Base64 of your `.jks` / `.keystore` |
-| `KEYSTORE_PASSWORD` | Keystore password |
-| `KEY_ALIAS` | Key alias |
-| `KEY_PASSWORD` | Key password |
-
-Encode keystore:
-
-```bash
-base64 -w0 your-release.keystore > keystore.b64
-```
+- Latest: <https://github.com/Trion129/WhisperTypeKeyboard/releases> (v1.4.0)
+- Per-ABI APKs: `arm64-v8a` (most phones), `armeabi-v7a`, `x86`, `x86_64` - plus an AAB
+- CI: **Actions** -> **Release** workflow; needs `KEYSTORE_*` secrets
+  (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) for
+  production signing. Without them the release is debug-signed.
 
 ## License
 
-MIT (see `LICENSE`). Third-party runtime and model licenses are listed in `NOTICE`.
+MIT (see `LICENSE`). Third-party runtime and model licenses are listed in
+`NOTICE`.
