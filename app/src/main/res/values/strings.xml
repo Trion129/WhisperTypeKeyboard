@@ -13,7 +13,7 @@
     <string name="step_mic">3. Allow microphone</string>
     <string name="step_mic_desc">Required for on-device voice typing</string>
     <string name="step_api">4. Download offline model</string>
-    <string name="step_api_desc">Download an on-device model (&lt;100MB) — fully local, no API keys</string>
+    <string name="step_api_desc">Download an on-device Whisper model (~230 MB). Fully local after install.</string>
     <string name="btn_open_ime_settings">Open keyboard settings</string>
     <string name="btn_select_ime">Select input method</string>
     <string name="btn_grant_mic">Grant microphone</string>
