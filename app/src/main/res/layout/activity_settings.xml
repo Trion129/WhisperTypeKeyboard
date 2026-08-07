@@ -38,7 +38,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
-            android:text="Whisper runs fully offline. Download a model from Hugging Face or import a sherpa-onnx Whisper zip."
+            android:text="@string/model_help"
             android:textColor="@color/key_text_secondary"
             android:textSize="13sp" />
 

@@ -42,5 +42,6 @@
     <string name="error_import_read">Could not read the selected file</string>
     <string name="error_import_invalid">Invalid model package (missing files)</string>
     <string name="error_import_io">Not enough space or write failed</string>
+    <string name="model_help">Whisper runs fully offline after install. Download a catalog model or import a sherpa-onnx Whisper zip.</string>
     <string name="sherpa_models_docs">More Whisper models (for Import): https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html</string>
 </resources>
