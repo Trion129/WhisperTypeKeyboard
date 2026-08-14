@@ -1,0 +1,3 @@
+1.5.0: Daily-driver IME.
+Emoji picker with search and skin tones. On-device word suggestions. Clipboard history while the IME is enabled. Accent/symbol long-press. Dictation warns at 25s and auto-stops at 30s. Cursor bar, globe key, sentence caps, double-space period, word-delete.
+Digits stay on the ?123 layer.

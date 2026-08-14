@@ -3,12 +3,14 @@ WhisperType is a full Android input method (IME) with a real QWERTY keyboard plu
 Unlike dictation-only "keyboards" that only show a microphone button, WhisperType lets you type normally and use speech when you want.
 
 Features:
-- Full QWERTY layout with numbers, symbols, and emoji layers
-- Shift / caps lock, space, enter, backspace (hold to repeat)
-- Microphone key for offline on-device speech-to-text
+- Full QWERTY layout with numbers, symbols, and a categorized emoji picker
+- Shift / caps lock, sentence caps, double-space period, word-delete swipe
+- On-device word suggestions and clipboard history
+- Long-press accents and extra symbols
+- Microphone key for offline on-device speech-to-text (25s warning, 30s auto-stop)
 - Downloadable Whisper models: tiny.en, base.en (default), or small.en (int8)
 - Import your own sherpa-onnx Whisper zip
-- No API keys - audio is processed on your device
+- No API keys - audio, clipboard, and learned words stay on your device
 - Free and open source (MIT)
 
 Setup:
