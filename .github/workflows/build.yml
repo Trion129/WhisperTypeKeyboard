@@ -35,8 +35,43 @@ jobs:
       - name: Grant Gradle wrapper permission
         run: chmod +x gradlew
 
-      - name: Test, lint, and build release APK
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for val in "$KEYSTORE_BASE64" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD"; do
+            if [ -z "$val" ]; then
+              echo "::error::Missing required signing secret — all four (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD) are required"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Test, lint, and build signed release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew testDebugUnitTest lintDebug assembleRelease --no-daemon
+
+      - name: Verify APKs are signed
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | tail -n1)"
+          found=0
+          for apk in app/build/outputs/apk/release/*.apk; do
+            echo "=== $apk ==="
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
+            found=1
+          done
+          test "$found" -eq 1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
