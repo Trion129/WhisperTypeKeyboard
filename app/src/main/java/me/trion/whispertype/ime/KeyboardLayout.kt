@@ -71,7 +71,6 @@ object KeyboardLayout {
     )
 
     val letters: List<List<KeyDef>> = listOf(
-        listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").map { symbol(it) },
         listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p").map { letter(it) },
         listOf("a", "s", "d", "f", "g", "h", "j", "k", "l").map { letter(it) },
         listOf(

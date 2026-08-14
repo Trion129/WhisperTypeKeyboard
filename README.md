@@ -10,11 +10,11 @@ all speech recognition runs on-device.
 
 | Feature | Details |
 |---------|---------|
-| Typing | QWERTY + number row, numbers/symbols layers, shift / caps lock, sentence caps, double-space period, word-delete swipe, cursor bar, globe IME switch |
+| Typing | QWERTY, numbers/symbols layers, shift / caps lock, sentence caps, double-space period, word-delete swipe, cursor bar, globe IME switch |
 | Long-press | Accents on letters, extra symbols on digits/punctuation (slide to select) |
 | Suggestions | On-device English wordlist + local learned words; incognito toggle |
 | Emoji | Categorized Unicode picker with search, recents, and skin tones (`😀`) |
-| Clipboard | Last 20 text clips, persisted, tap to paste, swipe or × to delete |
+| Clipboard | Last 20 text clips, captured while WhisperType is enabled, tap to paste, swipe or × to delete |
 | Voice | Offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); 25s warning, auto-stop at 30s |
 | Models | `tiny.en` / `base.en` (default, ~161 MB) / `small.en` int8; import a custom sherpa Whisper zip |
 | Privacy | No API keys — audio, clipboard, and learned words stay on the device |

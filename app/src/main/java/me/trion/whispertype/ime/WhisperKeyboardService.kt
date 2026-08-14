@@ -9,16 +9,16 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.text.InputType
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.core.content.ContextCompat
-import me.trion.whispertype.R
-import me.trion.whispertype.util.Prefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import me.trion.whispertype.R
+import me.trion.whispertype.util.Prefs
+import java.io.File
 
 class WhisperKeyboardService : InputMethodService() {
     private val serviceJob = SupervisorJob()
@@ -26,21 +26,19 @@ class WhisperKeyboardService : InputMethodService() {
     private var controller: KeyboardController? = null
     private var prefs: Prefs? = null
     private var clipboard: ClipboardManager? = null
+    private lateinit var clipboardStore: ClipboardStore
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        val cm = clipboard ?: return@OnPrimaryClipChangedListener
-        val clip = cm.primaryClip ?: return@OnPrimaryClipChangedListener
-        if (clip.itemCount == 0) return@OnPrimaryClipChangedListener
-        val desc = clip.description
-        val sensitive = isSensitive(desc) || isPasswordField()
-        val text = clip.getItemAt(0).coerceToText(this)?.toString() ?: return@OnPrimaryClipChangedListener
-        controller?.onPrimaryClip(text, sensitive)
+        capturePrimaryClip()
     }
 
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
+        clipboardStore = ClipboardStore(File(filesDir, "clipboard.json"))
         clipboard = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager
+        clipboard?.addPrimaryClipChangedListener(clipListener)
+        capturePrimaryClip()
     }
 
     override fun onCreateInputView(): View {
@@ -59,18 +57,18 @@ class WhisperKeyboardService : InputMethodService() {
             shouldOfferImeSwitch = {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && shouldOfferSwitchingToNextInputMethod()
             },
+            clipboardStore = clipboardStore,
         )
         return root
     }
-
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        capturePrimaryClip()
         controller?.onStartInput()
-        clipboard?.addPrimaryClipChangedListener(clipListener)
+        controller?.onClipboardChanged()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
-        clipboard?.removePrimaryClipChangedListener(clipListener)
         controller?.onFinishInput()
         super.onFinishInputView(finishingInput)
     }
@@ -83,13 +81,15 @@ class WhisperKeyboardService : InputMethodService() {
         super.onDestroy()
     }
 
-    private fun isPasswordField(): Boolean {
-        val info = currentInputEditorInfo ?: return false
-        val variation = info.inputType and InputType.TYPE_MASK_VARIATION
-        return variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
-            variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
-            variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
-            variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    private fun capturePrimaryClip() {
+        val cm = clipboard ?: return
+        val clip = cm.primaryClip ?: return
+        if (clip.itemCount == 0) return
+        if (isSensitive(clip.description)) return
+        if (prefs?.incognito == true) return
+        val text = clip.getItemAt(0).coerceToText(this)?.toString() ?: return
+        clipboardStore.capture(text, System.currentTimeMillis())
+        controller?.onClipboardChanged()
     }
 
     private fun isSensitive(desc: ClipDescription): Boolean {

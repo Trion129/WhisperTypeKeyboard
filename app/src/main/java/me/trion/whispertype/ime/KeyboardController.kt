@@ -43,13 +43,13 @@ class KeyboardController(
     private val requestMicPermission: () -> Boolean,
     private val switchToNextIme: () -> Boolean = { false },
     private val shouldOfferImeSwitch: () -> Boolean = { false },
+    private val clipboardStore: ClipboardStore,
 ) {
     private val prefs = Prefs(context)
     private val asr = LocalAsrEngine(context)
     private val recorder = AudioRecorder()
     private val limiter = RecordingLimiter()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val clipboardStore = ClipboardStore(File(context.filesDir, "clipboard.json"))
     private val unigramStore = UnigramStore(File(context.filesDir, "unigrams.json"))
 
     private val statusText: TextView = root.findViewById(R.id.status_text)
@@ -141,9 +141,7 @@ class KeyboardController(
         asr.release()
     }
 
-    fun onPrimaryClip(text: String, sensitive: Boolean) {
-        if (sensitive || isPrivate()) return
-        clipboardStore.capture(text, System.currentTimeMillis())
+    fun onClipboardChanged() {
         if (panel == Panel.CLIPBOARD) showClipboardPanel()
     }
 
@@ -182,8 +180,7 @@ class KeyboardController(
 
     private fun rebuildKeys() {
         val layout = KeyboardLayout.rowsFor(mode)
-        val showNumberRow = mode == KeyboardLayout.Mode.LETTERS && panel == Panel.NONE
-        rows[0].visibility = if (showNumberRow) View.VISIBLE else View.GONE
+        rows[0].visibility = View.GONE
         val hideLetterRows = panel != Panel.NONE
         for (i in 1..3) {
             rows[i].visibility = if (hideLetterRows) View.GONE else View.VISIBLE
@@ -193,11 +190,7 @@ class KeyboardController(
         emojiStripBtn.visibility =
             if (mode == KeyboardLayout.Mode.EMOJI || panel == Panel.EMOJI) View.GONE else View.VISIBLE
 
-        val mapped: List<List<KeyDef>> = if (mode == KeyboardLayout.Mode.LETTERS) {
-            layout
-        } else {
-            listOf(emptyList<KeyDef>()) + layout
-        }
+        val mapped: List<List<KeyDef>> = listOf(emptyList<KeyDef>()) + layout
         rows.forEachIndexed { index, row ->
             row.removeAllViews()
             val keys = mapped.getOrNull(index) ?: return@forEachIndexed

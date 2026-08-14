@@ -6,11 +6,11 @@ import org.junit.Test
 class KeyboardLayoutTest {
 
     @Test
-    fun `letters has a digit row then qwerty`() {
+    fun `letters starts with qwerty not a digit row`() {
         val letters = KeyboardLayout.letters
-        assertEquals(5, letters.size)
-        assertEquals(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"), letters[0].map { it.label })
-        assertEquals("q", letters[1].first().label)
+        assertEquals(4, letters.size)
+        assertEquals("q", letters[0].first().label)
+        assertTrue(letters.none { row -> row.any { it.label == "1" } })
     }
 
     @Test
@@ -32,13 +32,14 @@ class KeyboardLayoutTest {
 
     @Test
     fun `letter e carries accent popups from the catalog`() {
-        val e = KeyboardLayout.letters[1].first { it.label == "e" }
+        val e = KeyboardLayout.letters[0].first { it.label == "e" }
         assertEquals(KeyPopupCatalog.popupsFor("e"), e.popupLabels)
     }
 
     @Test
-    fun `non-letter modes do not include a fifth letter row`() {
+    fun `numbers layer has the digit row`() {
         assertEquals(4, KeyboardLayout.numbers.size)
+        assertEquals(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"), KeyboardLayout.numbers[0].map { it.label })
         assertEquals(4, KeyboardLayout.symbols.size)
         assertEquals(4, KeyboardLayout.emoji.size)
     }
