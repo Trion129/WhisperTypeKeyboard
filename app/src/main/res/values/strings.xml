@@ -22,9 +22,18 @@
     <string name="hint_test">Tap here and type or dictate…</string>
     <string name="pref_haptic">Haptic feedback</string>
     <string name="pref_auto_space">Auto-space after dictation</string>
+    <string name="pref_incognito">Incognito (no learning or clipboard capture)</string>
+    <string name="pref_double_space">Double-space period</string>
+    <string name="pref_sentence_caps">Auto-capitalize sentences</string>
     <string name="status_listening">Listening…</string>
+    <string name="status_listening_timer">Listening · %1$ds · %2$ds left</string>
     <string name="status_transcribing">Transcribing on-device…</string>
     <string name="status_ready">Ready</string>
+    <string name="clipboard_title">Clipboard</string>
+    <string name="clipboard_empty">No clipboard history</string>
+    <string name="clipboard_clear">Clear all</string>
+    <string name="clipboard_clear_confirm">Clear?</string>
+    <string name="emoji_search_hint">Search emoji</string>
     <string name="error_no_model">Install a model in settings</string>
     <string name="error_mic_permission">Microphone permission required</string>
     <string name="error_transcription">Transcription failed</string>
@@ -44,4 +53,10 @@
     <string name="error_import_io">Not enough space or write failed</string>
     <string name="model_help">Whisper runs fully offline after install. Download a catalog model or import a sherpa-onnx Whisper zip.</string>
     <string name="sherpa_models_docs">More Whisper models (for Import): https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html</string>
+    <string name="cursor_word_left">⟨ word</string>
+    <string name="cursor_left">⟨</string>
+    <string name="cursor_sel">sel</string>
+    <string name="cursor_right">⟩</string>
+    <string name="cursor_word_right">word ⟩</string>
+
 </resources>

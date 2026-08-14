@@ -16,4 +16,9 @@ third_party/
 *.dylib
 *.dll
 *.tar.bz2
+.worktrees/
+.superpowers/
 *.part
+
+__pycache__/
+*.pyc

@@ -10,10 +10,14 @@ all speech recognition runs on-device.
 
 | Feature | Details |
 |---------|---------|
-| Typing | Full QWERTY layout with numbers and symbols layers, shift / caps lock, long-press key alternatives, and an **emoji mode** (`😀` key) |
-| Voice | Fully offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (JitPack) |
-| Models | `tiny.en` / `base.en` (default, ~161 MB) / `small.en` int8; import a custom sherpa Whisper zip; more packs at <https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html> |
-| Privacy | No API keys - audio never leaves the device |
+| Typing | QWERTY + number row, numbers/symbols layers, shift / caps lock, sentence caps, double-space period, word-delete swipe, cursor bar, globe IME switch |
+| Long-press | Accents on letters, extra symbols on digits/punctuation (slide to select) |
+| Suggestions | On-device English wordlist + local learned words; incognito toggle |
+| Emoji | Categorized Unicode picker with search, recents, and skin tones (`😀`) |
+| Clipboard | Last 20 text clips, persisted, tap to paste, swipe or × to delete |
+| Voice | Offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); 25s warning, auto-stop at 30s |
+| Models | `tiny.en` / `base.en` (default, ~161 MB) / `small.en` int8; import a custom sherpa Whisper zip |
+| Privacy | No API keys — audio, clipboard, and learned words stay on the device |
 
 ## Setup
 
@@ -27,9 +31,10 @@ all speech recognition runs on-device.
 
 ## Usage
 
-Type normally with the keys; tap the **mic** to dictate (tap again to stop and
-insert the text); the **gear** opens settings; **long-press** keys for
-alternatives (e.g. accents); `😀` switches to the emoji layer.
+Type with the keys; tap the **mic** to dictate (tap again to stop, or wait for
+the 30s auto-stop); the **gear** opens settings; **long-press** keys for
+accents and symbols; `😀` opens the emoji picker; the clipboard chip opens
+history.
 
 ## Build
 

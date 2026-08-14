@@ -122,5 +122,29 @@
             android:paddingVertical="8dp"
             android:text="@string/pref_auto_space"
             android:textColor="@color/on_surface" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switch_incognito"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="@string/pref_incognito"
+            android:textColor="@color/on_surface" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switch_double_space"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="@string/pref_double_space"
+            android:textColor="@color/on_surface" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switch_sentence_caps"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="@string/pref_sentence_caps"
+            android:textColor="@color/on_surface" />
     </LinearLayout>
 </ScrollView>

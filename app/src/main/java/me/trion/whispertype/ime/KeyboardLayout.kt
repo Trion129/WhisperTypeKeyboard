@@ -12,7 +12,8 @@ enum class KeyType {
     MODE_EMOJI,
     MIC,
     COMMA,
-    PERIOD
+    PERIOD,
+    GLOBE
 }
 
 data class KeyDef(
@@ -28,111 +29,99 @@ data class KeyDef(
 object KeyboardLayout {
     enum class Mode { LETTERS, NUMBERS, SYMBOLS, EMOJI }
 
+    private fun letter(c: String): KeyDef {
+        return KeyDef(
+            KeyType.CHAR,
+            c,
+            c.uppercase(),
+            c[0].code,
+            popupLabels = KeyPopupCatalog.popupsFor(c)
+        )
+    }
+
+    private fun symbol(c: String): KeyDef {
+        return KeyDef(
+            KeyType.CHAR,
+            c,
+            c,
+            if (c.length == 1) c[0].code else 0,
+            popupLabels = KeyPopupCatalog.popupsFor(c)
+        )
+    }
+
+    private val bottomLetters = listOf(
+        KeyDef(KeyType.GLOBE, "🌐", weight = 1.1f),
+        KeyDef(KeyType.MODE_123, "?123", weight = 1.4f),
+        KeyDef(KeyType.MODE_EMOJI, "😀", weight = 1.2f),
+        KeyDef(KeyType.COMMA, ",", ",", popupLabels = KeyPopupCatalog.popupsFor(",")),
+        KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
+        KeyDef(KeyType.SPACE, "space", weight = 3.0f, popupLabels = KeyPopupCatalog.popupsFor(" ")),
+        KeyDef(KeyType.PERIOD, ".", ".", popupLabels = KeyPopupCatalog.popupsFor(".")),
+        KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
+    )
+
+    private val bottomOther = listOf(
+        KeyDef(KeyType.GLOBE, "🌐", weight = 1.1f),
+        KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
+        KeyDef(KeyType.COMMA, ",", ",", popupLabels = KeyPopupCatalog.popupsFor(",")),
+        KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
+        KeyDef(KeyType.SPACE, "space", weight = 4.2f, popupLabels = KeyPopupCatalog.popupsFor(" ")),
+        KeyDef(KeyType.PERIOD, ".", ".", popupLabels = KeyPopupCatalog.popupsFor(".")),
+        KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
+    )
+
     val letters: List<List<KeyDef>> = listOf(
-        listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p").map { c ->
-            KeyDef(KeyType.CHAR, c, c.uppercase(), c[0].code)
-        },
-        listOf("a", "s", "d", "f", "g", "h", "j", "k", "l").map { c ->
-            KeyDef(KeyType.CHAR, c, c.uppercase(), c[0].code)
-        },
+        listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").map { symbol(it) },
+        listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p").map { letter(it) },
+        listOf("a", "s", "d", "f", "g", "h", "j", "k", "l").map { letter(it) },
         listOf(
             KeyDef(KeyType.SHIFT, "⇧", weight = 1.4f, icon = true),
-            *listOf("z", "x", "c", "v", "b", "n", "m").map { c ->
-                KeyDef(KeyType.CHAR, c, c.uppercase(), c[0].code)
-            }.toTypedArray(),
+            *listOf("z", "x", "c", "v", "b", "n", "m").map { letter(it) }.toTypedArray(),
             KeyDef(KeyType.BACKSPACE, "⌫", weight = 1.4f, icon = true)
         ),
-        listOf(
-            KeyDef(KeyType.MODE_123, "?123", weight = 1.4f),
-            KeyDef(KeyType.MODE_EMOJI, "😀", weight = 1.2f),
-            KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
-            KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
-            KeyDef(KeyType.SPACE, "space", weight = 3.0f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
-            KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
-            KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
-        )
+        bottomLetters
     )
 
     val numbers: List<List<KeyDef>> = listOf(
-        listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").map {
-            KeyDef(KeyType.CHAR, it, it, it[0].code)
-        },
+        listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").map { symbol(it) },
         listOf(
-            KeyDef(KeyType.CHAR, "@", "@", '@'.code),
-            KeyDef(KeyType.CHAR, "#", "#", '#'.code),
-            KeyDef(KeyType.CHAR, "$", "$", '$'.code),
-            KeyDef(KeyType.CHAR, "%", "%", '%'.code),
-            KeyDef(KeyType.CHAR, "&", "&", '&'.code),
-            KeyDef(KeyType.CHAR, "-", "-", '-'.code, popupLabels = listOf("–", "—")),
-            KeyDef(KeyType.CHAR, "+", "+", '+'.code),
-            KeyDef(KeyType.CHAR, "(", "(", '('.code),
-            KeyDef(KeyType.CHAR, ")", ")", ')'.code),
-            KeyDef(KeyType.CHAR, "/", "/", '/'.code, popupLabels = listOf("\\"))
+            symbol("@"),
+            symbol("#"),
+            symbol("$"),
+            symbol("%"),
+            symbol("&"),
+            symbol("-"),
+            symbol("+"),
+            symbol("("),
+            symbol(")"),
+            symbol("/")
         ),
         listOf(
             KeyDef(KeyType.MODE_SYMBOLS, "=\\<", weight = 1.4f),
-            *listOf("*", "\"", "'", ":", ";").map {
-                KeyDef(KeyType.CHAR, it, it, it[0].code)
-            }.toTypedArray(),
-            KeyDef(KeyType.CHAR, "!", "!", '!'.code, popupLabels = listOf("¡")),
-            KeyDef(KeyType.CHAR, "?", "?", '?'.code, popupLabels = listOf("¿")),
+            *listOf("*", "\"", "'", ":", ";").map { symbol(it) }.toTypedArray(),
+            symbol("!"),
+            symbol("?"),
             KeyDef(KeyType.BACKSPACE, "⌫", weight = 1.4f, icon = true)
         ),
-        listOf(
-            KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
-            KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
-            KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
-            KeyDef(KeyType.SPACE, "space", weight = 4.2f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
-            KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
-            KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
-        )
+        bottomOther
     )
 
     val symbols: List<List<KeyDef>> = listOf(
-        listOf("~", "`", "|", "•", "√", "π", "÷", "×", "¶", "∆").map {
-            KeyDef(KeyType.CHAR, it, it)
-        },
-        listOf("£", "€", "¥", "^", "°", "=", "{", "}", "\\").map {
-            KeyDef(KeyType.CHAR, it, it)
-        },
+        listOf("~", "`", "|", "•", "√", "π", "÷", "×", "¶", "∆").map { symbol(it) },
+        listOf("£", "€", "¥", "^", "°", "=", "{", "}", "\\").map { symbol(it) },
         listOf(
             KeyDef(KeyType.MODE_123, "?123", weight = 1.4f),
-            *listOf("%", "©", "®", "™", "✓", "[", "]").map {
-                KeyDef(KeyType.CHAR, it, it)
-            }.toTypedArray(),
+            *listOf("%", "©", "®", "™", "✓", "[", "]").map { symbol(it) }.toTypedArray(),
             KeyDef(KeyType.BACKSPACE, "⌫", weight = 1.4f, icon = true)
         ),
-        listOf(
-            KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
-            KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
-            KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
-            KeyDef(KeyType.SPACE, "space", weight = 4.2f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
-            KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
-            KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
-        )
+        bottomOther
     )
 
     val emoji: List<List<KeyDef>> = listOf(
-        listOf("😀", "😂", "🥰", "😍", "🤔", "😎", "😭", "😡", "👍", "👎").map {
-            KeyDef(KeyType.CHAR, it)
-        },
-        listOf("❤️", "🔥", "✨", "🎉", "🙏", "👏", "💪", "🤝", "👀", "💯").map {
-            KeyDef(KeyType.CHAR, it)
-        },
-        listOf(
-            *listOf("🚀", "🌟", "💡", "✅", "❌", "🎵", "📷", "☕", "🍕").map {
-                KeyDef(KeyType.CHAR, it)
-            }.toTypedArray(),
-            KeyDef(KeyType.BACKSPACE, "⌫", weight = 1.4f, icon = true)
-        ),
-        listOf(
-            KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
-            KeyDef(KeyType.COMMA, ",", ",", popupLabels = listOf("'")),
-            KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
-            KeyDef(KeyType.SPACE, "space", weight = 3.0f, popupLabels = listOf("😊", "😂", "👍", "❤️", "🔥", "🎉", "🙏")),
-            KeyDef(KeyType.PERIOD, ".", ".", popupLabels = listOf("…")),
-            KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
-        )
+        emptyList(),
+        emptyList(),
+        emptyList(),
+        bottomOther
     )
 
     fun rowsFor(mode: Mode): List<List<KeyDef>> = when (mode) {

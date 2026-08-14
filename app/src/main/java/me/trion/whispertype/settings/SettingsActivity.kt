@@ -81,6 +81,19 @@ class SettingsActivity : AppCompatActivity() {
             isChecked = prefs.autoSpace
             setOnCheckedChangeListener { _, checked -> prefs.autoSpace = checked }
         }
+        findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switch_incognito).apply {
+            isChecked = prefs.incognito
+            setOnCheckedChangeListener { _, checked -> prefs.incognito = checked }
+        }
+        findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switch_double_space).apply {
+            isChecked = prefs.doubleSpacePeriod
+            setOnCheckedChangeListener { _, checked -> prefs.doubleSpacePeriod = checked }
+        }
+        findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switch_sentence_caps).apply {
+            isChecked = prefs.sentenceCaps
+            setOnCheckedChangeListener { _, checked -> prefs.sentenceCaps = checked }
+        }
+
 
         btnDownload.setOnClickListener { startDownload() }
         btnUse.setOnClickListener { useSelected() }

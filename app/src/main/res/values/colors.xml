@@ -10,6 +10,9 @@
     <color name="key_text">#FFFFFFFF</color>
     <color name="key_text_secondary">#FFAEAEB2</color>
     <color name="status_bar_bg">#FF2C2C2E</color>
+    <color name="status_warn">#FFFFD60A</color>
+    <color name="suggestion_chip">#FF3A3A3C</color>
+
     <color name="accent">#FF0A84FF</color>
     <color name="surface">#FF121212</color>
     <color name="on_surface">#FFFFFFFF</color>

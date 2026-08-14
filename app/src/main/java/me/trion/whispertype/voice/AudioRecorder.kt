@@ -14,6 +14,8 @@ class AudioRecorder {
     private var recordingThread: Thread? = null
     @Volatile private var isRecording = false
     private val pcmBuffer = ByteArrayOutputStream()
+    @Volatile var onBytes: ((Int) -> Unit)? = null
+
 
     fun start(): Boolean {
         if (isRecording) return true
@@ -56,9 +58,12 @@ class AudioRecorder {
             while (isRecording) {
                 val read = audioRecord.read(buffer, 0, buffer.size)
                 if (read > 0) {
+                    val size: Int
                     synchronized(pcmBuffer) {
                         pcmBuffer.write(buffer, 0, read)
+                        size = pcmBuffer.size()
                     }
+                    onBytes?.invoke(size)
                 }
             }
         }, "WhisperType-AudioRecorder").also {
