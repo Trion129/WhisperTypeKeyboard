@@ -12,6 +12,8 @@ import android.os.VibratorManager
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,6 +45,7 @@ class WhisperKeyboardService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val root = layoutInflater.inflate(R.layout.keyboard_view, null)
+        applyNavBarInset(root)
         controller = KeyboardController(
             context = this,
             root = root,
@@ -54,6 +57,21 @@ class WhisperKeyboardService : InputMethodService() {
             clipboardStore = clipboardStore,
         )
         return root
+    }
+
+    private fun applyNavBarInset(root: View) {
+        val baseBottom = root.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            v.setPadding(
+                v.paddingLeft,
+                v.paddingTop,
+                v.paddingRight,
+                NavBarInset.bottomPadding(baseBottom, nav)
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
     }
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
