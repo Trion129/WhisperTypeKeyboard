@@ -2,6 +2,7 @@ package me.trion.whispertype.ime
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.InsetDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -41,8 +42,6 @@ class KeyboardController(
     private val editorInfoProvider: () -> EditorInfo?,
     private val performHaptic: () -> Unit,
     private val requestMicPermission: () -> Boolean,
-    private val switchToNextIme: () -> Boolean = { false },
-    private val shouldOfferImeSwitch: () -> Boolean = { false },
     private val clipboardStore: ClipboardStore,
 ) {
     private val prefs = Prefs(context)
@@ -194,11 +193,7 @@ class KeyboardController(
         rows.forEachIndexed { index, row ->
             row.removeAllViews()
             val keys = mapped.getOrNull(index) ?: return@forEachIndexed
-            val offerGlobe = shouldOfferImeSwitch()
-            keys.forEach { key ->
-                if (key.type == KeyType.GLOBE && !offerGlobe) return@forEach
-                row.addView(createKeyView(key))
-            }
+            keys.forEach { key -> row.addView(createKeyView(key)) }
         }
         when (panel) {
             Panel.EMOJI -> showEmojiPanel()
@@ -207,18 +202,32 @@ class KeyboardController(
         }
     }
 
+    private fun refreshKeyLabels() {
+        rows.forEach { row ->
+            for (i in 0 until row.childCount) {
+                val child = row.getChildAt(i)
+                val key = child.tag as? KeyDef ?: continue
+                when (child) {
+                    is Button -> child.text = displayLabel(key)
+                    is ImageButton -> if (key.type == KeyType.SHIFT) {
+                        child.alpha = if (shiftState == ShiftState.OFF) 0.7f else 1f
+                    }
+                }
+            }
+        }
+    }
+
     private fun createKeyView(key: KeyDef): View {
         val density = context.resources.displayMetrics.density
-        val margin = (3 * density).toInt()
-        val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, key.weight).apply {
-            setMargins(margin, 0, margin, 0)
-        }
+        val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, key.weight)
 
         val view: View = if (key.type == KeyType.MIC || key.type == KeyType.BACKSPACE || key.type == KeyType.SHIFT) {
             ImageButton(context).apply {
                 scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                 setPadding((10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt(), (8 * density).toInt())
                 setColorFilter(ContextCompat.getColor(context, R.color.key_text))
+                minimumWidth = 0
+                minimumHeight = 0
                 when (key.type) {
                     KeyType.MIC -> {
                         setImageResource(R.drawable.ic_mic)
@@ -239,7 +248,7 @@ class KeyboardController(
                 isAllCaps = false
                 textSize = when (key.type) {
                     KeyType.SPACE -> 14f
-                    KeyType.MODE_123, KeyType.MODE_ABC, KeyType.MODE_SYMBOLS, KeyType.GLOBE -> 13f
+                    KeyType.MODE_123, KeyType.MODE_ABC, KeyType.MODE_SYMBOLS -> 13f
                     KeyType.MODE_EMOJI -> 16f
                     else -> 18f
                 }
@@ -252,18 +261,21 @@ class KeyboardController(
             }
         }
 
+        view.tag = key
         view.layoutParams = params
-        view.background = ContextCompat.getDrawable(
+        val gap = (1.5f * density).toInt().coerceAtLeast(1)
+        val chrome = ContextCompat.getDrawable(
             context,
             when (key.type) {
                 KeyType.MIC -> R.drawable.key_background_mic
                 KeyType.ENTER -> R.drawable.key_background_action
                 KeyType.SHIFT, KeyType.BACKSPACE, KeyType.MODE_123, KeyType.MODE_ABC,
-                KeyType.MODE_SYMBOLS, KeyType.MODE_EMOJI, KeyType.GLOBE ->
+                KeyType.MODE_SYMBOLS, KeyType.MODE_EMOJI ->
                     R.drawable.key_background_special
                 else -> R.drawable.key_background
             }
         )
+        view.background = InsetDrawable(chrome, gap, 0, gap, 0)
 
         when (key.type) {
             KeyType.BACKSPACE -> bindBackspace(view)
@@ -274,10 +286,7 @@ class KeyboardController(
                 if (popups.isNotEmpty()) {
                     bindKeyWithPopup(view, key, popups)
                 } else {
-                    view.setOnClickListener {
-                        performHaptic()
-                        onKey(key)
-                    }
+                    bindPressKey(view, key)
                 }
             }
         }
@@ -398,7 +407,7 @@ class KeyboardController(
                 commitTyped(text)
                 if (shiftState == ShiftState.ONCE) {
                     shiftState = ShiftState.OFF
-                    rebuildKeys()
+                    refreshKeyLabels()
                 }
             }
             KeyType.SPACE -> commitSpace()
@@ -424,7 +433,7 @@ class KeyboardController(
                     ShiftState.ONCE -> ShiftState.LOCKED
                     ShiftState.LOCKED -> ShiftState.OFF
                 }
-                rebuildKeys()
+                refreshKeyLabels()
             }
             KeyType.MODE_123 -> {
                 mode = KeyboardLayout.Mode.NUMBERS
@@ -446,7 +455,6 @@ class KeyboardController(
                 closePanel()
                 rebuildKeys()
             }
-            KeyType.GLOBE -> switchToNextIme()
             KeyType.BACKSPACE, KeyType.MIC -> Unit
         }
     }
@@ -481,42 +489,65 @@ class KeyboardController(
         refreshSuggestions()
     }
 
+    private fun bindPressKey(view: View, key: KeyDef) {
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                    v.isPressed = true
+                    performHaptic()
+                    onKey(key)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    true
+                }
+                else -> true
+            }
+        }
+    }
+
     private fun bindKeyWithPopup(view: View, key: KeyDef, popups: List<String>) {
         var longPressed = false
         var highlighted = -1
         val longPressRunnable = Runnable {
             longPressed = true
             performHaptic()
-            showPopupWindow(view, popups)
+            showPopupWindow(view, resolvedPopups(key))
             highlighted = -1
         }
 
         view.setOnTouchListener { v, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                     activePopup?.dismiss()
                     longPressed = false
                     highlighted = -1
                     v.isPressed = true
+                    performHaptic()
+                    onKey(key)
                     v.postDelayed(longPressRunnable, 300)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (longPressed) {
                         highlighted = highlightPopup(event.rawX)
+                    } else if (!KeyTouch.insideView(event.x, event.y, v.width, v.height)) {
+                        v.removeCallbacks(longPressRunnable)
                     }
                     true
                 }
-                MotionEvent.ACTION_UP -> {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                     v.removeCallbacks(longPressRunnable)
                     v.isPressed = false
                     if (longPressed) {
-                        val label = if (highlighted in popups.indices) popups[highlighted] else null
-                        if (label != null) commitPopupText(label) else onKey(key)
+                        val current = resolvedPopups(key)
+                        val label = if (highlighted in current.indices) current[highlighted] else null
+                        if (label != null) {
+                            inputConnectionProvider()?.deleteSurroundingText(1, 0)
+                            commitPopupText(label)
+                        }
                         activePopup?.dismiss()
-                    } else {
-                        performHaptic()
-                        onKey(key)
                     }
                     true
                 }
@@ -525,10 +556,11 @@ class KeyboardController(
                     v.isPressed = false
                     true
                 }
-                else -> false
+                else -> true
             }
         }
     }
+
 
     private fun highlightPopup(rawX: Float): Int {
         val popup = activePopup ?: return -1

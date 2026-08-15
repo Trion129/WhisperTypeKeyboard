@@ -14,7 +14,7 @@ class KeyboardLayoutTest {
     }
 
     @Test
-    fun `every mode bottom row has globe mic space enter`() {
+    fun `every mode bottom row has mic space enter and no globe`() {
         val modes = listOf(
             KeyboardLayout.letters,
             KeyboardLayout.numbers,
@@ -23,7 +23,7 @@ class KeyboardLayoutTest {
         )
         modes.forEach { rows ->
             val bottom = rows.last()
-            assertTrue(bottom.any { it.type == KeyType.GLOBE })
+            assertTrue(bottom.none { it.label == "🌐" })
             assertTrue(bottom.any { it.type == KeyType.MIC })
             assertTrue(bottom.any { it.type == KeyType.SPACE })
             assertTrue(bottom.any { it.type == KeyType.ENTER })

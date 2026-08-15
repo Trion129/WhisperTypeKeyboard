@@ -51,12 +51,6 @@ class WhisperKeyboardService : InputMethodService() {
             editorInfoProvider = { currentInputEditorInfo },
             performHaptic = { haptic() },
             requestMicPermission = { hasMicPermission() },
-            switchToNextIme = {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && switchToNextInputMethod(false)
-            },
-            shouldOfferImeSwitch = {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && shouldOfferSwitchingToNextInputMethod()
-            },
             clipboardStore = clipboardStore,
         )
         return root

@@ -10,7 +10,7 @@ all speech recognition runs on-device.
 
 | Feature | Details |
 |---------|---------|
-| Typing | QWERTY, numbers/symbols layers, shift / caps lock, sentence caps, double-space period, word-delete swipe, cursor bar, globe IME switch |
+| Typing | QWERTY, numbers/symbols layers, shift / caps lock, sentence caps, double-space period, word-delete swipe, cursor bar |
 | Long-press | Accents on letters, extra symbols on digits/punctuation (slide to select) |
 | Suggestions | On-device English wordlist + local learned words; incognito toggle |
 | Emoji | Categorized Unicode picker with search, recents, and skin tones (`😀`) |

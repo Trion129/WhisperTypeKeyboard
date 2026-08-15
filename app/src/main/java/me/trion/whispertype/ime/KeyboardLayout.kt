@@ -12,8 +12,7 @@ enum class KeyType {
     MODE_EMOJI,
     MIC,
     COMMA,
-    PERIOD,
-    GLOBE
+    PERIOD
 }
 
 data class KeyDef(
@@ -50,7 +49,6 @@ object KeyboardLayout {
     }
 
     private val bottomLetters = listOf(
-        KeyDef(KeyType.GLOBE, "🌐", weight = 1.1f),
         KeyDef(KeyType.MODE_123, "?123", weight = 1.4f),
         KeyDef(KeyType.MODE_EMOJI, "😀", weight = 1.2f),
         KeyDef(KeyType.COMMA, ",", ",", popupLabels = KeyPopupCatalog.popupsFor(",")),
@@ -61,7 +59,6 @@ object KeyboardLayout {
     )
 
     private val bottomOther = listOf(
-        KeyDef(KeyType.GLOBE, "🌐", weight = 1.1f),
         KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
         KeyDef(KeyType.COMMA, ",", ",", popupLabels = KeyPopupCatalog.popupsFor(",")),
         KeyDef(KeyType.MIC, "mic", weight = 1.2f, icon = true),
