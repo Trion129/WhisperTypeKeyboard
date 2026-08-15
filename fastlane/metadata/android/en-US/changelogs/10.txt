@@ -1,0 +1,2 @@
+1.5.1: Daily-driver polish.
+Globe key removed. Taps register on press, not a clean lift — fat-finger misses between keys are gone. Keyboard lifts above the gesture nav bar when the system reports an inset. Backspace deletes a whole emoji, not half of one.

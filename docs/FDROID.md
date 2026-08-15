@@ -39,8 +39,8 @@ This guide prepares and submits **me.trion.whispertype** to the main F-Droid rep
 
 4. **ABI-split APKs and binary URLs**  
    The release build produces one APK per ABI (`armeabi-v7a`, `arm64-v8a`,
-   `x86`, `x86_64`). Version codes are `base * 10 + offset` per ABI - for 1.5.0
-   (base 9) that is 91, 92, 93, 94 - and the fdroiddata recipe uses `binary:`
+   `x86`, `x86_64`). Version codes are `base * 10 + offset` per ABI - for 1.5.1
+   (base 10) that is 101, 102, 103, 104 - and the fdroiddata recipe uses `binary:`
    URLs pointing at the GitHub release assets plus `AllowedAPKSigningKeys` so
    each ABI APK is verified against the known signing key.
 
