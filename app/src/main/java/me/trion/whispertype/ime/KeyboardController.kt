@@ -671,7 +671,9 @@ class KeyboardController(
         if (!selected.isNullOrEmpty()) {
             ic.commitText("", 1)
         } else {
-            ic.deleteSurroundingText(1, 0)
+            val before = ic.getTextBeforeCursor(32, 0)?.toString().orEmpty()
+            val n = TypingRules.previousGraphemeLength(before).coerceAtLeast(1)
+            ic.deleteSurroundingText(n, 0)
         }
     }
 

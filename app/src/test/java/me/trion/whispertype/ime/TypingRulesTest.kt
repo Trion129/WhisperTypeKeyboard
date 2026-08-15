@@ -46,4 +46,34 @@ class TypingRulesTest {
         assertEquals(0, TypingRules.previousWordLength(""))
         assertEquals(1, TypingRules.previousWordLength(" "))
     }
+
+    @Test
+    fun `ascii letter deletes one unit`() {
+        assertEquals(1, TypingRules.previousGraphemeLength("hello"))
+        assertEquals(0, TypingRules.previousGraphemeLength(""))
+    }
+
+    @Test
+    fun `emoji surrogate pair deletes as one grapheme`() {
+        assertEquals(2, TypingRules.previousGraphemeLength("😀"))
+        assertEquals(2, TypingRules.previousGraphemeLength("a😀"))
+    }
+
+    @Test
+    fun `skin tone and zwj sequences delete as one grapheme`() {
+        assertEquals("👋🏻".length, TypingRules.previousGraphemeLength("👋🏻"))
+        assertEquals("👨‍👩‍👧".length, TypingRules.previousGraphemeLength("hi👨‍👩‍👧"))
+    }
+
+    @Test
+    fun `flag and keycap sequences delete as one grapheme`() {
+        assertEquals("🇺🇸".length, TypingRules.previousGraphemeLength("🇺🇸"))
+        assertEquals("2️⃣".length, TypingRules.previousGraphemeLength("2️⃣"))
+    }
+
+    @Test
+    fun `combining accent deletes with its base`() {
+        assertEquals(2, TypingRules.previousGraphemeLength("e\u0301"))
+        assertEquals(1, TypingRules.previousGraphemeLength("é"))
+    }
 }
