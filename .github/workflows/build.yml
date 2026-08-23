@@ -26,8 +26,12 @@ jobs:
       - uses: android-actions/setup-android@v3
       - name: Enable KVM access
         run: |
-          sudo chmod 666 /dev/kvm
-          ls -l /dev/kvm
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo 'KVM unavailable; emulator will use software acceleration'
+          fi
 
       - name: Grant Gradle wrapper permission
         run: chmod +x gradlew
