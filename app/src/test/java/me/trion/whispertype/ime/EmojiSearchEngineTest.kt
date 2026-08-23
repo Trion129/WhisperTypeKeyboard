@@ -9,7 +9,7 @@ class EmojiSearchEngineTest {
         groups = listOf("Smileys & Emotion", "Symbols", "Flags"),
         items = listOf(
             EmojiItem("🤣", "Smileys & Emotion", "face-smiling", "rolling on the floor laughing", listOf("laugh", "lol", "floor")),
-            EmojiItem("😂", "Smileys & Emotion", "face-smiling", "face with tears of joy", listOf("laugh", "joy", "stroller", "flooring")),
+            EmojiItem("😂", "Smileys & Emotion", "face-smiling", "face with tears of joy", listOf("laugh", "joy", "stroller", "dancefloor")),
             EmojiItem("❤️", "Symbols", "heart", "red heart", listOf("love", "heart")),
             EmojiItem("🇮🇳", "Flags", "country-flag", "flag: India", listOf("flag", "India")),
         ),
