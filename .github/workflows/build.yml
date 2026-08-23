@@ -24,6 +24,10 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+      - name: Enable KVM access
+        run: |
+          sudo chmod 666 /dev/kvm
+          ls -l /dev/kvm
 
       - name: Grant Gradle wrapper permission
         run: chmod +x gradlew
@@ -34,9 +38,9 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
-          emulator-options: -no-window -gpu off -no-snapshot -noaudio -no-boot-anim -no-metrics
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
+          emulator-boot-timeout: 1200
           disable-animations: true
-          disable-linux-hw-accel: true
           script: './gradlew :app:connectedDebugAndroidTest --no-daemon || { s=$?; mkdir -p emulator-failure; adb -s emulator-5554 logcat -d > emulator-failure/emulator-5554-logcat.txt || true; exit "$s"; }'
 
       - name: Upload integration reports
