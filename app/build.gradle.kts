@@ -14,6 +14,7 @@ android {
         // Keep these as plain literals so F-Droid checkupdates can parse them.
         versionCode = 10
         versionName = "1.5.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         splits {
             abi {
@@ -107,4 +108,9 @@ dependencies {
     implementation("com.github.k2-fsa:sherpa-onnx:v1.13.4")
 
     testImplementation("junit:junit:4.13.2")
+
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit-ktx:1.2.1")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }

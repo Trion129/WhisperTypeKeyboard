@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="emoji_search_entry" type="id" />
+    <item name="emoji_search_query" type="id" />
+    <item name="emoji_search_back" type="id" />
+    <item name="emoji_search_clear" type="id" />
+    <item name="emoji_result_grid" type="id" />
+</resources>
