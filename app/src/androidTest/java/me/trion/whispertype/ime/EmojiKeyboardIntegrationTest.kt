@@ -273,19 +273,38 @@ class EmojiKeyboardIntegrationTest {
             UI_TIMEOUT_MS,
             "$failureContext (missing host test field)",
         )
-        val fieldBounds = field.visibleBounds
+        val visibleBounds = field.visibleBounds
         val imeBounds = imeRoot.visibleBounds
         assertTrue(
-            "$failureContext: host field visible height was ${fieldBounds.height()} (bounds=$fieldBounds)",
-            fieldBounds.height() > 0,
+            "$failureContext: host field visible height was ${visibleBounds.height()} (bounds=$visibleBounds)",
+            visibleBounds.height() > 0,
         )
         assertTrue(
-            "$failureContext: host field bottom ${fieldBounds.bottom} exceeded display height ${device.displayHeight} (bounds=$fieldBounds)",
-            fieldBounds.bottom <= device.displayHeight,
+            "$failureContext: host field visible bottom ${visibleBounds.bottom} exceeded display height ${device.displayHeight} (bounds=$visibleBounds)",
+            visibleBounds.bottom <= device.displayHeight,
+        )
+
+        var fieldTop = 0
+        var fieldHeight = 0
+        activityRule.scenario.onActivity { activity ->
+            val hostField = activity.findViewById<EditText>(R.id.test_input)
+            val location = IntArray(2)
+            hostField.getLocationOnScreen(location)
+            fieldTop = location[1]
+            fieldHeight = hostField.height
+        }
+        val fieldBottom = fieldTop + fieldHeight
+        assertTrue(
+            "$failureContext: host field height was $fieldHeight",
+            fieldHeight > 0,
         )
         assertTrue(
-            "$failureContext: host field bottom ${fieldBounds.bottom} was not above IME top ${imeBounds.top} (fieldBounds=$fieldBounds, imeBounds=$imeBounds)",
-            fieldBounds.bottom <= imeBounds.top,
+            "$failureContext: host field top was $fieldTop (field must start on-screen)",
+            fieldTop >= 0,
+        )
+        assertTrue(
+            "$failureContext: full host field bottom $fieldBottom was not above IME top ${imeBounds.top} (imeBounds=$imeBounds)",
+            fieldBottom <= imeBounds.top,
         )
     }
 

@@ -612,7 +612,7 @@ Set `panelHost` to the fixed `SEARCH_PANEL_HEIGHT_DP = 112dp` in search mode and
 - `EmojiPanelView.renderSearch` uses a fixed 36dp query header.
 - The emoji results use the remaining weighted `ScrollView` result viewport.
 - The local keyboard keeps three fixed 48dp QWERTY rows plus a fixed 48dp utility row.
-- The host editor remains fully above the IME after opening search and after entering the query. The integration assertion requires positive host-field visible height, `visibleBounds.bottom <= device.displayHeight`, and `visibleBounds.bottom <= keyboard_root.visibleBounds.top`.
+- The host editor remains fully above the IME after opening search and after entering the query. The integration assertion uses stable `test_input` and `keyboard_root` selectors plus full `EditText` geometry from `ActivityScenario` (`getLocationOnScreen` and measured `height`), rather than relying only on clipped `visibleBounds`. It requires positive full-view height, nonnegative top, full-view bottom no greater than `keyboard_root.visibleBounds.top`, and supplementary `visibleBounds.bottom <= device.displayHeight`.
 
 Assign deterministic key descriptions in normal and emoji-search modes:
 
