@@ -62,7 +62,9 @@ class EmojiKeyboardIntegrationTest {
     fun searchQueryStaysLocalAndResultCommits() {
         openEmojiSearch()
         typeEmojiSearch("red heart")
-
+        assertHostEditorVisible(
+            failureContext = "The host editor became hidden after entering the emoji search query",
+        )
         assertResourceText(
             resourceName = "emoji_search_query",
             expected = "red heart",
@@ -154,6 +156,9 @@ class EmojiKeyboardIntegrationTest {
             resourceName = "emoji_search_entry",
             timeoutMs = FEATURE_TIMEOUT_MS,
             failureContext = "Opening the emoji panel did not expose the stable emoji search entry",
+        )
+        assertHostEditorVisible(
+            failureContext = "The host editor became hidden after opening emoji search",
         )
     }
 
@@ -255,6 +260,23 @@ class EmojiKeyboardIntegrationTest {
             SystemClock.sleep(POLL_INTERVAL_MS)
         }
         throw AssertionError("$failureContext: expected '$expected', last observed '$actual'")
+    }
+
+    private fun assertHostEditorVisible(failureContext: String) {
+        val field = waitForObject(
+            By.res(APP_PACKAGE, "test_input"),
+            UI_TIMEOUT_MS,
+            "$failureContext (missing host test field)",
+        )
+        val bounds = field.visibleBounds
+        assertTrue(
+            "$failureContext: host field visible height was ${bounds.height()} (bounds=$bounds)",
+            bounds.height() > 0,
+        )
+        assertTrue(
+            "$failureContext: host field bottom ${bounds.bottom} exceeded display height ${device.displayHeight} (bounds=$bounds)",
+            bounds.bottom <= device.displayHeight,
+        )
     }
 
     private fun assertFieldText(expected: String, failureContext: String) {

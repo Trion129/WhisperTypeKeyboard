@@ -607,7 +607,12 @@ val layout = if (emojiSearchActive) KeyboardLayout.emojiSearch else KeyboardLayo
 val hideTypingRows = panel != Panel.NONE && !emojiSearchActive
 ```
 
-Set `panelHost` to 112dp in search mode and 162dp in browse mode. Restore 162dp when the panel closes.
+Set `panelHost` to the fixed `SEARCH_PANEL_HEIGHT_DP = 112dp` in search mode and restore 162dp when the panel closes. The search geometry is bounded and must not expand for an unbounded emoji grid:
+
+- `EmojiPanelView.renderSearch` uses a fixed 36dp query header.
+- The emoji results use the remaining weighted `ScrollView` result viewport.
+- The local keyboard keeps three fixed 48dp QWERTY rows plus a fixed 48dp utility row.
+- The host editor remains visible after opening search and after entering the query. The integration assertion requires positive host-field visible height and `visibleBounds.bottom <= device.displayHeight`.
 
 Assign deterministic key descriptions in normal and emoji-search modes:
 
