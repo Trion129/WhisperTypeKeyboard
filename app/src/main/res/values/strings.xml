@@ -34,6 +34,9 @@
     <string name="clipboard_clear">Clear all</string>
     <string name="clipboard_clear_confirm">Clear?</string>
     <string name="emoji_search_hint">Search emoji</string>
+    <string name="emoji_search_back">Back to emoji groups</string>
+    <string name="emoji_search_clear">Clear emoji search</string>
+    <string name="emoji_search_no_results">No emoji found</string>
     <string name="error_no_model">Install a model in settings</string>
     <string name="error_mic_permission">Microphone permission required</string>
     <string name="error_transcription">Transcription failed</string>
