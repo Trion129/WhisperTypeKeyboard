@@ -15,6 +15,7 @@ import androidx.test.uiautomator.Until
 import me.trion.whispertype.R
 import me.trion.whispertype.settings.SetupActivity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -71,6 +72,7 @@ class EmojiKeyboardIntegrationTest {
             expected = "",
             failureContext = "Typing an emoji search query leaked text into the host editor",
         )
+        assertRedHeartFilterResults()
 
         clickDescription(
             description = "red heart",
@@ -188,6 +190,22 @@ class EmojiKeyboardIntegrationTest {
             timeoutMs,
             "$failureContext (missing resource '$resourceName')",
         ).click()
+    }
+
+    private fun assertRedHeartFilterResults() {
+        waitForObject(
+            By.res(APP_PACKAGE, "emoji_result_grid")
+                .hasDescendant(By.desc("red heart")),
+            UI_TIMEOUT_MS,
+            "The filtered emoji result grid did not contain the 'red heart' cell",
+        )
+        assertFalse(
+            "The filtered 'red heart' result grid still contained the unrelated 'grinning face' cell",
+            device.hasObject(
+                By.res(APP_PACKAGE, "emoji_result_grid")
+                    .hasDescendant(By.desc("grinning face")),
+            ),
+        )
     }
 
     private fun clickDescription(
