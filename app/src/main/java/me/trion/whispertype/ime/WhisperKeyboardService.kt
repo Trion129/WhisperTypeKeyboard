@@ -62,12 +62,14 @@ class WhisperKeyboardService : InputMethodService() {
     private fun applyNavBarInset(root: View) {
         val baseBottom = root.paddingBottom
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
-            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            val navigation = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            val gestures = insets.getInsets(WindowInsetsCompat.Type.systemGestures()).bottom
+            val bottomInset = NavBarInset.effectiveBottomInset(navigation, gestures)
             v.setPadding(
                 v.paddingLeft,
                 v.paddingTop,
                 v.paddingRight,
-                NavBarInset.bottomPadding(baseBottom, nav)
+                NavBarInset.bottomPadding(baseBottom, bottomInset)
             )
             insets
         }

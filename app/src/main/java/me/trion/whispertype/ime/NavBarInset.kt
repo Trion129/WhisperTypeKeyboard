@@ -6,6 +6,12 @@ package me.trion.whispertype.ime
  * already sits above the bar send 0 and keep the layout's own padding.
  */
 object NavBarInset {
+    fun effectiveBottomInset(
+        navigationBarInsetPx: Int,
+        systemGestureInsetPx: Int,
+    ): Int {
+        return maxOf(navigationBarInsetPx, systemGestureInsetPx, 0)
+    }
     fun bottomPadding(basePaddingPx: Int, systemInsetPx: Int): Int {
         return basePaddingPx + systemInsetPx.coerceAtLeast(0)
     }
