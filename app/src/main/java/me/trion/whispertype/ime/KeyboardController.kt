@@ -83,11 +83,12 @@ class KeyboardController(
     private var emojiCatalog: EmojiCatalog? = null
     private val emojiSearchSession = EmojiSearchSession()
     private val emojiSearchEngine by lazy { EmojiSearchEngine(catalog()) }
+    private val emojiSuggestionEngine by lazy { EmojiSuggestionEngine(emojiSearchEngine) }
     private val emojiPanelView = EmojiPanelView(context, panelHost)
     private var emojiPanelMode = EmojiPanelMode.BROWSE
     private var activeEmojiGroup = "recents"
     private var suggestionEngine: SuggestionEngine? = null
-    private var lastSuggestions: List<String> = emptyList()
+    private var lastSuggestions: List<SuggestionItem> = emptyList()
 
     private enum class ShiftState { OFF, ONCE, LOCKED }
     private enum class Panel { NONE, EMOJI, CLIPBOARD }
@@ -856,8 +857,7 @@ class KeyboardController(
         return SuggestionEngine(words).also { suggestionEngine = it }
     }
 
-    private fun currentWord(): String {
-        val before = inputConnectionProvider()?.getTextBeforeCursor(48, 0)?.toString() ?: return ""
+    private fun currentWord(before: String): String {
         val i = before.indexOfLast { !it.isLetter() }
         return if (i < 0) before else before.substring(i + 1)
     }
@@ -865,17 +865,26 @@ class KeyboardController(
     private fun refreshSuggestions() {
         if (isListening || isTranscribing) return
         suggestionRow.removeAllViews()
-        val prefix = currentWord()
-        lastSuggestions = engine().suggest(prefix, unigramStore.snapshot(), 3)
+        val before = inputConnectionProvider()?.getTextBeforeCursor(64, 0)?.toString().orEmpty()
+        val prefix = currentWord(before)
+        val words = engine().suggest(prefix, unigramStore.snapshot(), 3)
+        val emojis = emojiSuggestionEngine.suggest(before, 2)
+        lastSuggestions = SuggestionComposer.compose(words, emojis, 3)
         val density = context.resources.displayMetrics.density
-        lastSuggestions.forEach { word ->
+        lastSuggestions.forEach { item ->
             val chip = TextView(context).apply {
-                text = word
+                when (item) {
+                    is SuggestionItem.Word -> text = item.text
+                    is SuggestionItem.Emoji -> {
+                        text = item.candidate.item.emoji
+                        contentDescription = item.candidate.item.name
+                    }
+                }
                 gravity = Gravity.CENTER
                 setTextColor(ContextCompat.getColor(context, R.color.key_text))
                 textSize = 14f
                 setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
-                setOnClickListener { applySuggestion(word) }
+                setOnClickListener { applySuggestion(item) }
             }
             suggestionRow.addView(
                 chip,
@@ -885,18 +894,29 @@ class KeyboardController(
         incognitoGlyph.visibility = if (isPrivate()) View.VISIBLE else View.GONE
     }
 
-    private fun applySuggestion(word: String) {
+    private fun applySuggestion(item: SuggestionItem) {
         val ic = inputConnectionProvider() ?: return
-        val prefix = currentWord()
-        if (prefix.isNotEmpty()) ic.deleteSurroundingText(prefix.length, 0)
-        ic.commitText(word, 1)
-        if (!isPrivate()) unigramStore.learn(word)
+        when (item) {
+            is SuggestionItem.Word -> {
+                val prefix = currentWord(ic.getTextBeforeCursor(48, 0)?.toString().orEmpty())
+                if (prefix.isNotEmpty()) ic.deleteSurroundingText(prefix.length, 0)
+                ic.commitText(item.text, 1)
+                if (!isPrivate()) unigramStore.learn(item.text)
+            }
+            is SuggestionItem.Emoji -> {
+                val replacement = item.candidate.replacement
+                ic.deleteSurroundingText(replacement.deleteBeforeCursor, 0)
+                ic.commitText(replacement.commitText, 1)
+                if (!isPrivate()) rememberEmoji(item.candidate.item.emoji)
+            }
+        }
         refreshSuggestions()
     }
 
     private fun learnCurrentWord() {
         if (isPrivate()) return
-        val word = currentWord()
+        val before = inputConnectionProvider()?.getTextBeforeCursor(48, 0)?.toString().orEmpty()
+        val word = currentWord(before)
         if (word.length >= 2) unigramStore.learn(word)
     }
 

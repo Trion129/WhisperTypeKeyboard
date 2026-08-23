@@ -34,6 +34,24 @@ class EmojiSuggestionEngineTest {
             assertEquals(trigger, emojis, engine.suggest(trigger).map { it.item.emoji })
         }
     }
+    @Test
+    fun `reviewed aliases keep two emoji slots and one word slot`() {
+        val expected = mapOf(
+            "cry" to listOf("😢", "😭"),
+            "sad" to listOf("😢", "😭"),
+            "love" to listOf("❤️", "😍"),
+            "heart" to listOf("❤️", "😍"),
+        )
+
+        expected.forEach { (trigger, emojis) ->
+            val candidates = engine.suggest(trigger)
+            assertEquals(emojis, candidates.map { it.item.emoji })
+            val composed = SuggestionComposer.compose(listOf("word"), candidates)
+            assertEquals(3, composed.size)
+            assertEquals(SuggestionItem.Word("word"), composed.last())
+        }
+    }
+
 
     @Test
     fun `partial triggers return no emoji candidates`() {
