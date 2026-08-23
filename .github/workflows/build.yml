@@ -37,16 +37,7 @@ jobs:
           emulator-options: -no-window -gpu off -no-snapshot -noaudio -no-boot-anim -no-metrics
           disable-animations: true
           disable-linux-hw-accel: true
-          script: |
-            set +e
-            ./gradlew :app:connectedDebugAndroidTest --no-daemon
-            gradle_status=$?
-            set -e
-            if [ "$gradle_status" -ne 0 ]; then
-              mkdir -p emulator-failure
-              adb -s emulator-5554 logcat -d > emulator-failure/emulator-5554-logcat.txt || true
-            fi
-            exit "$gradle_status"
+          script: './gradlew :app:connectedDebugAndroidTest --no-daemon || { s=$?; mkdir -p emulator-failure; adb -s emulator-5554 logcat -d > emulator-failure/emulator-5554-logcat.txt || true; exit "$s"; }'
 
       - name: Upload integration reports
         if: always()
