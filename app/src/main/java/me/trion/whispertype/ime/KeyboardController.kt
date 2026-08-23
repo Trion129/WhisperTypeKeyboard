@@ -899,6 +899,7 @@ class KeyboardController(
 
     private fun showEmojiPanel() {
         val cat = catalog()
+        val searchEngine = EmojiSearchEngine(cat)
         panelHost.removeAllViews()
         val density = context.resources.displayMetrics.density
         val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -978,7 +979,7 @@ class KeyboardController(
 
         emojiFilter = { q ->
             search.text = q
-            if (q.isBlank()) showGroup(activeGroup) else fill(cat.search(q))
+            if (q.isBlank()) showGroup(activeGroup) else fill(searchEngine.search(q))
         }
 
         showGroup("recents")

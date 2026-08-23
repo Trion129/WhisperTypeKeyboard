@@ -19,15 +19,6 @@ class EmojiCatalog(
 
     fun inGroup(group: String): List<EmojiItem> = items.filter { it.group == group }
 
-    fun search(query: String): List<EmojiItem> {
-        val q = query.trim().lowercase()
-        if (q.isEmpty()) return emptyList()
-        return items.filter { item ->
-            item.name.lowercase().contains(q) ||
-                item.keywords.any { it.lowercase().contains(q) } ||
-                item.emoji == query.trim()
-        }
-    }
 
     fun recents(emojis: List<String>, cap: Int = 24): List<EmojiItem> {
         val out = ArrayList<EmojiItem>(minOf(cap, emojis.size))
