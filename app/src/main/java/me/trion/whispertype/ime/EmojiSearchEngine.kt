@@ -62,6 +62,7 @@ class EmojiSearchEngine(
     }
 
     private fun String.hasTokenPrefix(needle: String): Boolean {
+        if (' ' in needle) return startsWith(needle)
         var start = 0
         while (start < length) {
             if (regionMatches(start, needle, 0, needle.length)) return true

@@ -42,6 +42,21 @@ class EmojiSearchEngineTest {
     }
 
     @Test
+    fun `multi word prefix applies only at field start`() {
+        val engine = EmojiSearchEngine(
+            EmojiCatalog(
+                groups = listOf("Test"),
+                items = listOf(
+                    EmojiItem("🎭", "Test", "later", "grinning face with joy", emptyList()),
+                    EmojiItem("😂", "Test", "start", "face with tears of joy", emptyList()),
+                ),
+            ),
+        )
+
+        assertEquals(listOf("😂", "🎭"), engine.search("face wi").map { it.emoji })
+    }
+
+    @Test
     fun `substring matches normalized metadata`() {
         assertEquals(listOf("😂"), engine.search("tear").map { it.emoji })
     }
