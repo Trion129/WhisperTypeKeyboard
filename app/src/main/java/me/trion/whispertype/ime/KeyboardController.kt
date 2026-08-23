@@ -865,7 +865,7 @@ class KeyboardController(
     private fun refreshSuggestions() {
         if (isListening || isTranscribing) return
         suggestionRow.removeAllViews()
-        val before = inputConnectionProvider()?.getTextBeforeCursor(64, 0)?.toString().orEmpty()
+        val before = inputConnectionProvider()?.getTextBeforeCursor(CURRENT_WORD_CONTEXT_LENGTH, 0)?.toString().orEmpty()
         val prefix = currentWord(before)
         val words = engine().suggest(prefix, unigramStore.snapshot(), 3)
         val emojis = emojiSuggestionEngine.suggest(before, 2)
@@ -898,7 +898,9 @@ class KeyboardController(
         val ic = inputConnectionProvider() ?: return
         when (item) {
             is SuggestionItem.Word -> {
-                val prefix = currentWord(ic.getTextBeforeCursor(48, 0)?.toString().orEmpty())
+                val prefix = currentWord(
+                    ic.getTextBeforeCursor(CURRENT_WORD_CONTEXT_LENGTH, 0)?.toString().orEmpty()
+                )
                 if (prefix.isNotEmpty()) ic.deleteSurroundingText(prefix.length, 0)
                 ic.commitText(item.text, 1)
                 if (!isPrivate()) unigramStore.learn(item.text)
@@ -915,7 +917,7 @@ class KeyboardController(
 
     private fun learnCurrentWord() {
         if (isPrivate()) return
-        val before = inputConnectionProvider()?.getTextBeforeCursor(48, 0)?.toString().orEmpty()
+        val before = inputConnectionProvider()?.getTextBeforeCursor(CURRENT_WORD_CONTEXT_LENGTH, 0)?.toString().orEmpty()
         val word = currentWord(before)
         if (word.length >= 2) unigramStore.learn(word)
     }
@@ -1172,6 +1174,7 @@ class KeyboardController(
         repeat(steps) { moveBy(code) }
     }
     private companion object {
+        const val CURRENT_WORD_CONTEXT_LENGTH = 64
         const val SEARCH_PANEL_HEIGHT_DP = 112
         const val BROWSE_PANEL_HEIGHT_DP = 162
     }
