@@ -10,7 +10,9 @@ class EmojiSearchSession(initialQuery: String = "") {
     }
 
     fun backspace(): String {
-        if (query.isNotEmpty()) query = query.dropLast(1)
+        if (query.isNotEmpty()) {
+            query = query.substring(0, query.offsetByCodePoints(query.length, -1))
+        }
         return query
     }
 

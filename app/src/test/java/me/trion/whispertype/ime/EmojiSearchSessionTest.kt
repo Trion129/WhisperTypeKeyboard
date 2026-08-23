@@ -24,6 +24,13 @@ class EmojiSearchSessionTest {
     }
 
     @Test
+    fun `backspace removes one astral code point`() {
+        val session = EmojiSearchSession("😀")
+
+        assertEquals("", session.backspace())
+    }
+
+    @Test
     fun `unsupported query characters are ignored`() {
         val session = EmojiSearchSession("ha")
 
