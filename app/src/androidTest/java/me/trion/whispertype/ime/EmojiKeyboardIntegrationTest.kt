@@ -263,19 +263,29 @@ class EmojiKeyboardIntegrationTest {
     }
 
     private fun assertHostEditorVisible(failureContext: String) {
+        val imeRoot = waitForObject(
+            By.res(APP_PACKAGE, "keyboard_root"),
+            UI_TIMEOUT_MS,
+            "$failureContext (missing IME root)",
+        )
         val field = waitForObject(
             By.res(APP_PACKAGE, "test_input"),
             UI_TIMEOUT_MS,
             "$failureContext (missing host test field)",
         )
-        val bounds = field.visibleBounds
+        val fieldBounds = field.visibleBounds
+        val imeBounds = imeRoot.visibleBounds
         assertTrue(
-            "$failureContext: host field visible height was ${bounds.height()} (bounds=$bounds)",
-            bounds.height() > 0,
+            "$failureContext: host field visible height was ${fieldBounds.height()} (bounds=$fieldBounds)",
+            fieldBounds.height() > 0,
         )
         assertTrue(
-            "$failureContext: host field bottom ${bounds.bottom} exceeded display height ${device.displayHeight} (bounds=$bounds)",
-            bounds.bottom <= device.displayHeight,
+            "$failureContext: host field bottom ${fieldBounds.bottom} exceeded display height ${device.displayHeight} (bounds=$fieldBounds)",
+            fieldBounds.bottom <= device.displayHeight,
+        )
+        assertTrue(
+            "$failureContext: host field bottom ${fieldBounds.bottom} was not above IME top ${imeBounds.top} (fieldBounds=$fieldBounds, imeBounds=$imeBounds)",
+            fieldBounds.bottom <= imeBounds.top,
         )
     }
 

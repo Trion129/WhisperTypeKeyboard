@@ -55,7 +55,7 @@ Search mode uses a bounded panel rather than an unbounded emoji grid:
 - The emoji results use the remaining weighted `ScrollView` viewport.
 - The local keyboard keeps three fixed 48dp QWERTY rows plus a fixed 48dp utility row.
 
-The host editor must remain visible after opening emoji search and after entering a search query. The integration suite accepts this only when the host field has positive visible height and its visible bounds bottom is no greater than the display height.
+The host editor must remain fully above the IME after opening emoji search and after entering a search query. The integration suite accepts this only when the host field has positive visible height, its visible bounds bottom is no greater than the display height, and its visible bounds bottom is no greater than the visible top of `keyboard_root`.
 
 The search engine normalizes case and whitespace. It ranks results in this order:
 
