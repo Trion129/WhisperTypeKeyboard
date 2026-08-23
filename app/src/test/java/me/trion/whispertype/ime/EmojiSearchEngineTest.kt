@@ -8,8 +8,8 @@ class EmojiSearchEngineTest {
     private val catalog = EmojiCatalog(
         groups = listOf("Smileys & Emotion", "Symbols", "Flags"),
         items = listOf(
-            EmojiItem("😂", "Smileys & Emotion", "face-smiling", "face with tears of joy", listOf("laugh", "joy", "stroller")),
-            EmojiItem("🤣", "Smileys & Emotion", "face-smiling", "rolling on the floor laughing", listOf("laugh", "lol")),
+            EmojiItem("🤣", "Smileys & Emotion", "face-smiling", "rolling on the floor laughing", listOf("laugh", "lol", "floor")),
+            EmojiItem("😂", "Smileys & Emotion", "face-smiling", "face with tears of joy", listOf("laugh", "joy", "stroller", "flooring")),
             EmojiItem("❤️", "Symbols", "heart", "red heart", listOf("love", "heart")),
             EmojiItem("🇮🇳", "Flags", "country-flag", "flag: India", listOf("flag", "India")),
         ),
@@ -33,7 +33,7 @@ class EmojiSearchEngineTest {
 
     @Test
     fun `exact keyword ranks before substring`() {
-        assertEquals(listOf("😂", "🤣"), engine.search("laugh").take(2).map { it.emoji })
+        assertEquals(listOf("🤣", "😂"), engine.search("floor").take(2).map { it.emoji })
     }
 
     @Test
@@ -53,7 +53,7 @@ class EmojiSearchEngineTest {
 
     @Test
     fun `equal scores preserve catalog order`() {
-        assertEquals(listOf("😂", "🤣"), engine.search("face").map { it.emoji })
+        assertEquals(listOf("🤣", "😂"), engine.search("face").map { it.emoji })
     }
 
     @Test
