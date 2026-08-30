@@ -38,6 +38,14 @@ object KeyboardLayout {
         )
     }
 
+    private fun searchLetter(c: String): KeyDef = KeyDef(
+        type = KeyType.CHAR,
+        label = c,
+        shiftLabel = c.uppercase(),
+        code = c[0].code,
+        popupLabels = emptyList(),
+    )
+
     private fun symbol(c: String): KeyDef {
         return KeyDef(
             KeyType.CHAR,
@@ -67,6 +75,17 @@ object KeyboardLayout {
         KeyDef(KeyType.ENTER, "⏎", weight = 1.6f)
     )
 
+    private val emojiSearchThird = listOf(
+        *listOf("z", "x", "c", "v", "b", "n", "m").map(::searchLetter).toTypedArray(),
+        KeyDef(KeyType.BACKSPACE, "⌫", weight = 1.4f, icon = true),
+    )
+
+    private val bottomEmojiSearch = listOf(
+        KeyDef(KeyType.MODE_ABC, "ABC", weight = 1.4f),
+        KeyDef(KeyType.MODE_EMOJI, "😀", weight = 1.2f),
+        KeyDef(KeyType.SPACE, "space", weight = 5.0f, popupLabels = emptyList()),
+    )
+
     val letters: List<List<KeyDef>> = listOf(
         listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p").map { letter(it) },
         listOf("a", "s", "d", "f", "g", "h", "j", "k", "l").map { letter(it) },
@@ -76,6 +95,13 @@ object KeyboardLayout {
             KeyDef(KeyType.BACKSPACE, "⌫", weight = 1.4f, icon = true)
         ),
         bottomLetters
+    )
+
+    val emojiSearch: List<List<KeyDef>> = listOf(
+        listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p").map(::searchLetter),
+        listOf("a", "s", "d", "f", "g", "h", "j", "k", "l").map(::searchLetter),
+        emojiSearchThird,
+        bottomEmojiSearch,
     )
 
     val numbers: List<List<KeyDef>> = listOf(

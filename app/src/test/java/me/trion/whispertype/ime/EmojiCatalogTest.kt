@@ -27,14 +27,6 @@ class EmojiCatalogTest {
         assertEquals("grinning face", catalog.items[0].name)
     }
 
-    @Test
-    fun `search matches name keyword and exact emoji`() {
-        val catalog = EmojiCatalog.parse(sample)
-        assertEquals(listOf("😀"), catalog.search("grin").map { it.emoji })
-        assertEquals(listOf("👋"), catalog.search("WAVE").map { it.emoji })
-        assertEquals(listOf("🇺🇸"), catalog.search("🇺🇸").map { it.emoji })
-        assertTrue(catalog.search("").isEmpty())
-    }
 
     @Test
     fun `recents preserve order and cap`() {

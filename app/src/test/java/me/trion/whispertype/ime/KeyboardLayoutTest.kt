@@ -37,6 +37,25 @@ class KeyboardLayoutTest {
     }
 
     @Test
+    fun `emoji search has popup free qwerty and local actions`() {
+        val rows = KeyboardLayout.emojiSearch
+
+        assertEquals(listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"), rows[0].map { it.label })
+        assertEquals(listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"), rows[1].map { it.label })
+        assertEquals(listOf("z", "x", "c", "v", "b", "n", "m"), rows[2].filter { it.type == KeyType.CHAR }.map { it.label })
+        assertTrue(rows[2].any { it.type == KeyType.BACKSPACE })
+
+        val bottom = rows.last()
+        assertTrue(bottom.any { it.type == KeyType.SPACE })
+        assertTrue(bottom.any { it.type == KeyType.MODE_EMOJI })
+        assertTrue(bottom.any { it.type == KeyType.MODE_ABC })
+
+        val queryKeys = rows.flatten().filter { it.type == KeyType.CHAR || it.type == KeyType.SPACE }
+        assertTrue(queryKeys.isNotEmpty())
+        assertTrue(queryKeys.all { it.popupLabels.isEmpty() })
+    }
+
+    @Test
     fun `numbers layer has the digit row`() {
         assertEquals(4, KeyboardLayout.numbers.size)
         assertEquals(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"), KeyboardLayout.numbers[0].map { it.label })

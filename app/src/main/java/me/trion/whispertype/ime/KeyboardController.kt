@@ -15,7 +15,6 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -82,13 +81,18 @@ class KeyboardController(
     private var panel: Panel = Panel.NONE
     private var clearArmedUntil = 0L
     private var emojiCatalog: EmojiCatalog? = null
+    private val emojiSearchSession = EmojiSearchSession()
+    private val emojiSearchEngine by lazy { EmojiSearchEngine(catalog()) }
+    private val emojiSuggestionEngine by lazy { EmojiSuggestionEngine(emojiSearchEngine) }
+    private val emojiPanelView = EmojiPanelView(context, panelHost)
+    private var emojiPanelMode = EmojiPanelMode.BROWSE
+    private var activeEmojiGroup = "recents"
     private var suggestionEngine: SuggestionEngine? = null
-    private var lastSuggestions: List<String> = emptyList()
-    private var emojiQuery: TextView? = null
-    private var emojiFilter: ((String) -> Unit)? = null
+    private var lastSuggestions: List<SuggestionItem> = emptyList()
 
     private enum class ShiftState { OFF, ONCE, LOCKED }
     private enum class Panel { NONE, EMOJI, CLIPBOARD }
+    private enum class EmojiPanelMode { BROWSE, SEARCH }
 
     init {
         settingsBtn.setOnClickListener {
@@ -101,7 +105,6 @@ class KeyboardController(
         emojiStripBtn.setOnClickListener {
             mode = KeyboardLayout.Mode.EMOJI
             togglePanel(Panel.EMOJI)
-            rebuildKeys()
         }
         recorder.onBytes = { bytes ->
             mainHandler.post { onRecordingBytes(bytes) }
@@ -128,6 +131,11 @@ class KeyboardController(
         }
         activePopup?.dismiss()
         activePopup = null
+        emojiSearchSession.clear()
+        emojiPanelMode = EmojiPanelMode.BROWSE
+        mode = KeyboardLayout.Mode.LETTERS
+        closePanel()
+        rebuildKeys()
     }
 
     fun destroy() {
@@ -178,14 +186,16 @@ class KeyboardController(
     }
 
     private fun rebuildKeys() {
-        val layout = KeyboardLayout.rowsFor(mode)
+        val emojiSearchActive = isEmojiSearchActive()
+        val layout = if (emojiSearchActive) KeyboardLayout.emojiSearch else KeyboardLayout.rowsFor(mode)
         rows[0].visibility = View.GONE
-        val hideLetterRows = panel != Panel.NONE
+        val hideTypingRows = panel != Panel.NONE && !emojiSearchActive
         for (i in 1..3) {
-            rows[i].visibility = if (hideLetterRows) View.GONE else View.VISIBLE
+            rows[i].visibility = if (hideTypingRows) View.GONE else View.VISIBLE
         }
         rows[4].visibility = View.VISIBLE
         panelHost.visibility = if (panel != Panel.NONE) View.VISIBLE else View.GONE
+        setPanelHeight(if (emojiSearchActive) SEARCH_PANEL_HEIGHT_DP else BROWSE_PANEL_HEIGHT_DP)
         emojiStripBtn.visibility =
             if (mode == KeyboardLayout.Mode.EMOJI || panel == Panel.EMOJI) View.GONE else View.VISIBLE
 
@@ -200,6 +210,10 @@ class KeyboardController(
             Panel.CLIPBOARD -> showClipboardPanel()
             Panel.NONE -> panelHost.removeAllViews()
         }
+    }
+
+    private fun isEmojiSearchActive(): Boolean {
+        return panel == Panel.EMOJI && emojiPanelMode == EmojiPanelMode.SEARCH
     }
 
     private fun refreshKeyLabels() {
@@ -219,6 +233,7 @@ class KeyboardController(
 
     private fun createKeyView(key: KeyDef): View {
         val density = context.resources.displayMetrics.density
+        val emojiSearchActive = isEmojiSearchActive()
         val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, key.weight)
 
         val view: View = if (key.type == KeyType.MIC || key.type == KeyType.BACKSPACE || key.type == KeyType.SHIFT) {
@@ -276,11 +291,19 @@ class KeyboardController(
             }
         )
         view.background = InsetDrawable(chrome, gap, 0, gap, 0)
+        view.contentDescription = when {
+            emojiSearchActive && key.type == KeyType.CHAR -> "emoji-search-key-${key.label}"
+            emojiSearchActive && key.type == KeyType.SPACE -> "emoji-search-space"
+            emojiSearchActive && key.type == KeyType.BACKSPACE -> "emoji-search-backspace"
+            key.type == KeyType.CHAR -> "key-${key.label}"
+            key.type == KeyType.SPACE -> "key-space"
+            else -> view.contentDescription
+        }
 
         when (key.type) {
             KeyType.BACKSPACE -> bindBackspace(view)
             KeyType.MIC -> view.setOnClickListener { onMicTapped() }
-            KeyType.SPACE -> bindSpace(view, key)
+            KeyType.SPACE -> if (emojiSearchActive) bindPressKey(view, key) else bindSpace(view, key)
             else -> {
                 val popups = resolvedPopups(key)
                 if (popups.isNotEmpty()) {
@@ -294,6 +317,7 @@ class KeyboardController(
     }
 
     private fun resolvedPopups(key: KeyDef): List<String> {
+        if (isEmojiSearchActive()) return emptyList()
         if (key.popupLabels.isNotEmpty()) {
             return if (shouldUppercase() && key.type == KeyType.CHAR) {
                 KeyPopupCatalog.popupsFor(key.label, uppercase = true)
@@ -348,10 +372,11 @@ class KeyboardController(
                     v.isPressed = false
                     deleteJob?.let { mainHandler.removeCallbacks(it) }
                     deleteJob = null
-                    if (event.action == MotionEvent.ACTION_UP && downX - event.x > 48f) {
+                    val searchBackspace = isEmojiSearchActive()
+                    if (event.action == MotionEvent.ACTION_UP && !searchBackspace && downX - event.x > 48f) {
                         deleteWord()
                     }
-                    refreshSuggestions()
+                    if (!searchBackspace) refreshSuggestions()
                     true
                 }
                 else -> false
@@ -396,6 +421,7 @@ class KeyboardController(
     }
 
     private fun onKey(key: KeyDef) {
+        if (routeEmojiSearchKey(key)) return
         val ic = inputConnectionProvider() ?: return
         when (key.type) {
             KeyType.CHAR -> {
@@ -443,7 +469,6 @@ class KeyboardController(
             KeyType.MODE_EMOJI -> {
                 mode = KeyboardLayout.Mode.EMOJI
                 togglePanel(Panel.EMOJI)
-                rebuildKeys()
             }
             KeyType.MODE_SYMBOLS -> {
                 mode = KeyboardLayout.Mode.SYMBOLS
@@ -458,13 +483,28 @@ class KeyboardController(
             KeyType.BACKSPACE, KeyType.MIC -> Unit
         }
     }
+    private fun routeEmojiSearchKey(key: KeyDef): Boolean {
+        if (!isEmojiSearchActive()) return false
+        when (key.type) {
+            KeyType.CHAR -> emojiSearchSession.append(key.label)
+            KeyType.SPACE -> emojiSearchSession.append(" ")
+            KeyType.BACKSPACE -> emojiSearchSession.backspace()
+            KeyType.MODE_EMOJI -> {
+                emojiSearchSession.clear()
+                emojiPanelMode = EmojiPanelMode.BROWSE
+            }
+            KeyType.MODE_ABC -> {
+                mode = KeyboardLayout.Mode.LETTERS
+                closePanel()
+            }
+            else -> return true
+        }
+        rebuildKeys()
+        return true
+    }
+
 
     private fun commitTyped(text: String) {
-        if (panel == Panel.EMOJI && text.all { it.isLetterOrDigit() || it == ' ' }) {
-            val next = (emojiQuery?.text?.toString() ?: "") + text
-            emojiFilter?.invoke(next)
-            return
-        }
         inputConnectionProvider()?.commitText(text, 1)
         if (text.any { !it.isLetter() }) learnCurrentWord()
         refreshSuggestions()
@@ -659,12 +699,10 @@ class KeyboardController(
     }
 
     private fun deleteOnce() {
-        if (panel == Panel.EMOJI) {
-            val q = emojiQuery?.text?.toString().orEmpty()
-            if (q.isNotEmpty()) {
-                emojiFilter?.invoke(q.dropLast(1))
-                return
-            }
+        if (isEmojiSearchActive()) {
+            emojiSearchSession.backspace()
+            rebuildKeys()
+            return
         }
         val ic = inputConnectionProvider() ?: return
         val selected = ic.getSelectedText(0)
@@ -819,8 +857,7 @@ class KeyboardController(
         return SuggestionEngine(words).also { suggestionEngine = it }
     }
 
-    private fun currentWord(): String {
-        val before = inputConnectionProvider()?.getTextBeforeCursor(48, 0)?.toString() ?: return ""
+    private fun currentWord(before: String): String {
         val i = before.indexOfLast { !it.isLetter() }
         return if (i < 0) before else before.substring(i + 1)
     }
@@ -828,17 +865,26 @@ class KeyboardController(
     private fun refreshSuggestions() {
         if (isListening || isTranscribing) return
         suggestionRow.removeAllViews()
-        val prefix = currentWord()
-        lastSuggestions = engine().suggest(prefix, unigramStore.snapshot(), 3)
+        val before = inputConnectionProvider()?.getTextBeforeCursor(CURRENT_WORD_CONTEXT_LENGTH, 0)?.toString().orEmpty()
+        val prefix = currentWord(before)
+        val words = engine().suggest(prefix, unigramStore.snapshot(), 3)
+        val emojis = emojiSuggestionEngine.suggest(before, 2)
+        lastSuggestions = SuggestionComposer.compose(words, emojis, 3)
         val density = context.resources.displayMetrics.density
-        lastSuggestions.forEach { word ->
+        lastSuggestions.forEach { item ->
             val chip = TextView(context).apply {
-                text = word
+                when (item) {
+                    is SuggestionItem.Word -> text = item.text
+                    is SuggestionItem.Emoji -> {
+                        text = item.candidate.item.emoji
+                        contentDescription = item.candidate.item.name
+                    }
+                }
                 gravity = Gravity.CENTER
                 setTextColor(ContextCompat.getColor(context, R.color.key_text))
                 textSize = 14f
                 setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
-                setOnClickListener { applySuggestion(word) }
+                setOnClickListener { applySuggestion(item) }
             }
             suggestionRow.addView(
                 chip,
@@ -848,23 +894,40 @@ class KeyboardController(
         incognitoGlyph.visibility = if (isPrivate()) View.VISIBLE else View.GONE
     }
 
-    private fun applySuggestion(word: String) {
+    private fun applySuggestion(item: SuggestionItem) {
         val ic = inputConnectionProvider() ?: return
-        val prefix = currentWord()
-        if (prefix.isNotEmpty()) ic.deleteSurroundingText(prefix.length, 0)
-        ic.commitText(word, 1)
-        if (!isPrivate()) unigramStore.learn(word)
+        when (item) {
+            is SuggestionItem.Word -> {
+                val prefix = currentWord(
+                    ic.getTextBeforeCursor(CURRENT_WORD_CONTEXT_LENGTH, 0)?.toString().orEmpty()
+                )
+                if (prefix.isNotEmpty()) ic.deleteSurroundingText(prefix.length, 0)
+                ic.commitText(item.text, 1)
+                if (!isPrivate()) unigramStore.learn(item.text)
+            }
+            is SuggestionItem.Emoji -> {
+                val replacement = item.candidate.replacement
+                ic.deleteSurroundingText(replacement.deleteBeforeCursor, 0)
+                ic.commitText(replacement.commitText, 1)
+                if (!isPrivate()) rememberEmoji(item.candidate.item.emoji)
+            }
+        }
         refreshSuggestions()
     }
 
     private fun learnCurrentWord() {
         if (isPrivate()) return
-        val word = currentWord()
+        val before = inputConnectionProvider()?.getTextBeforeCursor(CURRENT_WORD_CONTEXT_LENGTH, 0)?.toString().orEmpty()
+        val word = currentWord(before)
         if (word.length >= 2) unigramStore.learn(word)
     }
 
     private fun togglePanel(target: Panel) {
+        val previousPanel = panel
         panel = if (panel == target) Panel.NONE else target
+        if (previousPanel == Panel.EMOJI && panel != Panel.EMOJI) {
+            resetEmojiPanel()
+        }
         if (panel == Panel.NONE && mode == KeyboardLayout.Mode.EMOJI) {
             mode = KeyboardLayout.Mode.LETTERS
         }
@@ -875,10 +938,23 @@ class KeyboardController(
     }
 
     private fun closePanel() {
+        if (panel == Panel.EMOJI) resetEmojiPanel()
         panel = Panel.NONE
         cursorVisible = false
         cursorBar.visibility = View.GONE
         selecting = false
+        setPanelHeight(BROWSE_PANEL_HEIGHT_DP)
+    }
+
+    private fun resetEmojiPanel() {
+        emojiSearchSession.clear()
+        emojiPanelMode = EmojiPanelMode.BROWSE
+    }
+
+    private fun setPanelHeight(heightDp: Int) {
+        val height = (heightDp * context.resources.displayMetrics.density).toInt()
+        if (panelHost.layoutParams.height == height) return
+        panelHost.layoutParams = panelHost.layoutParams.apply { this.height = height }
     }
 
     private fun catalog(): EmojiCatalog {
@@ -896,99 +972,54 @@ class KeyboardController(
         val next = (listOf(emoji) + prefs.emojiRecents()).distinct().take(24)
         prefs.setEmojiRecents(next)
     }
+    private fun commitEmoji(item: EmojiItem) {
+        commitPopupText(item.emoji)
+        if (!isPrivate()) rememberEmoji(item.emoji)
+    }
+
 
     private fun showEmojiPanel() {
         val cat = catalog()
-        panelHost.removeAllViews()
-        val density = context.resources.displayMetrics.density
-        val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-
-        val search = TextView(context).apply {
-            hint = context.getString(R.string.emoji_search_hint)
-            setHintTextColor(ContextCompat.getColor(context, R.color.key_text_secondary))
-            setTextColor(ContextCompat.getColor(context, R.color.key_text))
-            textSize = 14f
-            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
+        val tones: (View, List<String>) -> Unit = { anchor, variants ->
+            showPopupWindow(anchor, variants)
         }
-        emojiQuery = search
-
-        val tabs = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
-        val tabRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        tabs.addView(tabRow)
-        val gridScroll = ScrollView(context)
-        val grid = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        gridScroll.addView(grid)
-
-        fun fill(items: List<EmojiItem>) {
-            grid.removeAllViews()
-            val cols = 8
-            var row: LinearLayout? = null
-            items.forEachIndexed { index, item ->
-                if (index % cols == 0) {
-                    row = LinearLayout(context).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        layoutParams = LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            (40 * density).toInt()
-                        )
-                    }
-                    grid.addView(row)
-                }
-                val cell = TextView(context).apply {
-                    text = item.emoji
-                    gravity = Gravity.CENTER
-                    textSize = 18f
-                    setOnClickListener {
-                        commitPopupText(item.emoji)
-                        if (!isPrivate()) rememberEmoji(item.emoji)
-                    }
-                    if (item.toneCapable) {
-                        setOnLongClickListener {
-                            showPopupWindow(this, item.tones)
-                            true
-                        }
-                    }
-                }
-                row!!.addView(cell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
-            }
+        when (emojiPanelMode) {
+            EmojiPanelMode.BROWSE -> emojiPanelView.renderBrowse(
+                catalog = cat,
+                activeGroup = activeEmojiGroup,
+                recents = cat.recents(prefs.emojiRecents()),
+                onSearch = {
+                    emojiSearchSession.clear()
+                    emojiPanelMode = EmojiPanelMode.SEARCH
+                    rebuildKeys()
+                },
+                onGroup = { group ->
+                    activeEmojiGroup = group
+                    rebuildKeys()
+                },
+                onEmoji = ::commitEmoji,
+                onTones = tones,
+            )
+            EmojiPanelMode.SEARCH -> emojiPanelView.renderSearch(
+                query = emojiSearchSession.query,
+                results = emojiSearchEngine.search(emojiSearchSession.query),
+                onBack = {
+                    emojiSearchSession.clear()
+                    emojiPanelMode = EmojiPanelMode.BROWSE
+                    rebuildKeys()
+                },
+                onClear = {
+                    emojiSearchSession.clear()
+                    rebuildKeys()
+                },
+                onEmoji = { item ->
+                    commitEmoji(item)
+                    emojiSearchSession.clear()
+                    rebuildKeys()
+                },
+                onTones = tones,
+            )
         }
-
-        var activeGroup = "recents"
-        fun showGroup(name: String) {
-            activeGroup = name
-            val items = if (name == "recents") cat.recents(prefs.emojiRecents()) else cat.inGroup(name)
-            fill(items)
-        }
-
-        tabRow.removeAllViews()
-        (listOf("recents") + cat.groups).forEach { name ->
-            val tab = TextView(context).apply {
-                text = if (name == "recents") "🕒" else name.split(' ').first()
-                setTextColor(ContextCompat.getColor(context, R.color.key_text))
-                textSize = 12f
-                setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
-                setOnClickListener {
-                    search.text = ""
-                    showGroup(name)
-                }
-                contentDescription = name
-            }
-            tabRow.addView(tab)
-        }
-
-        emojiFilter = { q ->
-            search.text = q
-            if (q.isBlank()) showGroup(activeGroup) else fill(cat.search(q))
-        }
-
-        showGroup("recents")
-        column.addView(search, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (36 * density).toInt()))
-        column.addView(tabs, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (32 * density).toInt()))
-        column.addView(gridScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        panelHost.addView(
-            column,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        )
     }
 
     private fun showClipboardPanel() {
@@ -1142,4 +1173,10 @@ class KeyboardController(
         val code = if (dir < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
         repeat(steps) { moveBy(code) }
     }
+    private companion object {
+        const val CURRENT_WORD_CONTEXT_LENGTH = 64
+        const val SEARCH_PANEL_HEIGHT_DP = 112
+        const val BROWSE_PANEL_HEIGHT_DP = 162
+    }
+
 }

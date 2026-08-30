@@ -12,7 +12,54 @@ env:
   JAVA_VERSION: "17"
 
 jobs:
+  instrumented:
+    name: IME integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+      - name: Enable KVM access
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo 'KVM unavailable; emulator will use software acceleration'
+          fi
+
+      - name: Grant Gradle wrapper permission
+        run: chmod +x gradlew
+
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
+          emulator-boot-timeout: 1200
+          disable-animations: true
+          script: './gradlew :app:connectedDebugAndroidTest --no-daemon || { s=$?; mkdir -p emulator-failure; adb -s emulator-5554 logcat -d > emulator-failure/emulator-5554-logcat.txt || true; exit "$s"; }'
+
+      - name: Upload integration reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emoji-integration-reports
+          path: |
+            app/build/reports/androidTests/connected/
+            app/build/outputs/androidTest-results/connected/
+            emulator-failure/
+          if-no-files-found: ignore
+
   build:
+    needs: instrumented
     name: Build APK
     runs-on: ubuntu-latest
     steps:
