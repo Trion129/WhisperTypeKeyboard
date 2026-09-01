@@ -6,8 +6,8 @@ import org.junit.Test
 class ModelCatalogTest {
 
     @Test
-    fun `catalog has three unique entries`() {
-        assertEquals(3, ModelCatalog.entries.size)
+    fun `catalog has six unique entries`() {
+        assertEquals(6, ModelCatalog.entries.size)
         assertEquals(
             "Model ids must be unique",
             ModelCatalog.entries.size,
@@ -63,5 +63,30 @@ class ModelCatalogTest {
         assertEquals(104, ModelCatalog.byId("tiny.en")!!.approxSizeMb)
         assertEquals(161, ModelCatalog.byId("base.en")!!.approxSizeMb)
         assertEquals(375, ModelCatalog.byId("small.en")!!.approxSizeMb)
+    }
+
+    @Test
+    fun `catalog includes multilingual whisper variants`() {
+        val ids = ModelCatalog.entries.map { it.id }
+        assertEquals(
+            listOf("tiny.en", "base.en", "small.en", "tiny", "base", "small"),
+            ids
+        )
+        assertFalse(ModelCatalog.byId("tiny.en")!!.isMultilingual)
+        assertTrue(ModelCatalog.byId("tiny")!!.isMultilingual)
+        assertEquals("Whisper Base Multilingual", ModelCatalog.byId("base")!!.title)
+        assertEquals(161, ModelCatalog.byId("base")!!.approxSizeMb)
+    }
+
+    @Test
+    fun `language resolution preserves english-only models`() {
+        assertEquals("", ModelCatalog.normalizeLanguage(""))
+        assertEquals("fr", ModelCatalog.normalizeLanguage("fr"))
+        assertEquals("", ModelCatalog.normalizeLanguage("not-a-language"))
+        assertEquals("en", ModelCatalog.effectiveLanguage("base.en", "fr"))
+        assertEquals("fr", ModelCatalog.effectiveLanguage("base", "fr"))
+        assertEquals("", ModelCatalog.effectiveLanguage("base", ""))
+        assertEquals("en", ModelCatalog.effectiveLanguage(ModelCatalog.IMPORT_ID, "fr"))
+        assertEquals("en", ModelCatalog.effectiveLanguage("unknown", "fr"))
     }
 }

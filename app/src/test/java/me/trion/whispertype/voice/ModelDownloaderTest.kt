@@ -61,6 +61,21 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun `every catalog model resolves its three required files`() {
+        for (spec in ModelCatalog.entries) {
+            writeCatalogInstall(spec.id)
+            assertNotNull("missing files for ${spec.id}", ModelDownloader.resolvePathsIn(modelsDir, spec.id))
+        }
+    }
+
+    @Test
+    fun `import detection recognizes multilingual catalog prefixes`() {
+        assertEquals("tiny", ModelDownloader.detectCatalogId("tiny-encoder.int8.onnx"))
+        assertEquals("base", ModelDownloader.detectCatalogId("base-encoder.int8.onnx"))
+        assertEquals("small", ModelDownloader.detectCatalogId("small-encoder.int8.onnx"))
+    }
+
+    @Test
     fun `unknown id never resolves`() {
         writeCatalogInstall("tiny.en")
         assertNull(ModelDownloader.resolvePathsIn(modelsDir, "nope"))
