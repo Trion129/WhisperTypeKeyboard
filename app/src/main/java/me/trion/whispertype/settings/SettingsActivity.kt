@@ -24,12 +24,14 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var downloader: ModelDownloader
     private lateinit var modelStatus: TextView
     private lateinit var modelPicker: Spinner
+    private lateinit var languagePicker: Spinner
     private lateinit var btnDownload: Button
     private lateinit var btnUse: Button
     private lateinit var btnImport: Button
     private lateinit var btnDelete: Button
     private lateinit var progress: ProgressBar
     private var busy = false
+    private var updatingLanguagePicker = false
 
     private val importLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -47,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
 
         modelStatus = findViewById(R.id.model_status)
         modelPicker = findViewById(R.id.model_picker)
+        languagePicker = findViewById(R.id.language_picker)
         btnDownload = findViewById(R.id.btn_download)
         btnUse = findViewById(R.id.btn_use)
         btnImport = findViewById(R.id.btn_import)
@@ -59,6 +62,30 @@ class SettingsActivity : AppCompatActivity() {
             ModelCatalog.entries.map { "${it.title} (${it.approxSizeMb} MB)" }
         ).apply {
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        languagePicker.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            ModelCatalog.languageOptions.map { it.title }
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        languagePicker.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?,
+                view: android.view.View?,
+                position: Int,
+                id: Long
+            ) {
+                if (updatingLanguagePicker || !selectedModel().isMultilingual) return
+                val language = ModelCatalog.languageOptions.getOrNull(position)?.code ?: return
+                if (prefs.transcriptionLanguage == language) return
+                prefs.transcriptionLanguage = language
+                LocalAsrEngine.releaseAll()
+                refreshUi()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
         modelPicker.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
@@ -108,10 +135,12 @@ class SettingsActivity : AppCompatActivity() {
         downloader.purgeLegacyInstall()
         prefs.migrate()
 
-        // Default selection: base.en
+        // Restore the active catalog model when possible; otherwise use base.en.
+        val activeIdx =
+            ModelCatalog.entries.indexOfFirst { it.id == prefs.activeModelId }
         val defaultIdx =
             ModelCatalog.entries.indexOfFirst { it.id == ModelCatalog.DEFAULT_ID }.coerceAtLeast(0)
-        modelPicker.setSelection(defaultIdx)
+        modelPicker.setSelection(if (activeIdx >= 0) activeIdx else defaultIdx)
 
         refreshUi()
     }
@@ -126,11 +155,35 @@ class SettingsActivity : AppCompatActivity() {
         refreshUi()
     }
 
-    private fun selectedId(): String = ModelCatalog.entries[modelPicker.selectedItemPosition].id
+    private fun selectedModel() =
+        ModelCatalog.entries.getOrElse(modelPicker.selectedItemPosition) {
+            ModelCatalog.entries.first()
+        }
+
+    private fun selectedId(): String = selectedModel().id
+
+    private fun refreshLanguagePicker() {
+        val selected = selectedModel()
+        val language = if (selected.isMultilingual) {
+            prefs.transcriptionLanguage
+        } else {
+            ModelCatalog.ENGLISH_LANGUAGE
+        }
+        val index = ModelCatalog.languageOptions.indexOfFirst { it.code == language }
+            .coerceAtLeast(0)
+        updatingLanguagePicker = true
+        try {
+            languagePicker.isEnabled = selected.isMultilingual
+            languagePicker.setSelection(index)
+        } finally {
+            updatingLanguagePicker = false
+        }
+    }
 
     private fun refreshUi() {
-        val selected = ModelCatalog.entries[modelPicker.selectedItemPosition]
+        val selected = selectedModel()
         val active = prefs.activeModelId
+        refreshLanguagePicker()
         val importInstalled = downloader.isInstalled(ModelCatalog.IMPORT_ID)
 
         val state = when {

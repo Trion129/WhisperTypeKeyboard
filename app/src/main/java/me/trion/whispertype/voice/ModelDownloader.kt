@@ -40,9 +40,8 @@ internal fun installImportZip(
         }
         val (encoder, decoder, tokens) = found
 
-        // If the package uses a catalog prefix (tiny.en- / base.en- / small.en-)
-        // it installs into that model id's folder; anything else goes to the
-        // generic import slot.
+        // If the package uses a catalog prefix (<id>-), it installs into that
+        // model id's folder; anything else goes to the generic import slot.
         val targetId = ModelDownloader.detectCatalogId(encoder.name) ?: ModelCatalog.IMPORT_ID
         val names = ModelDownloader.requiredFileNames(targetId)
         val canonEncoder = File(staging, names[0])
@@ -284,7 +283,7 @@ class ModelDownloader(private val context: Context) {
 
         /**
          * Detects a catalog id from an imported encoder basename prefix
-         * (tiny.en- / base.en- / small.en-), or null for unknown packages.
+         * (<id>-), or null for unknown packages.
          */
         fun detectCatalogId(encoderName: String): String? =
             ModelCatalog.entries.firstOrNull { encoderName.startsWith("${it.id}-") }?.id

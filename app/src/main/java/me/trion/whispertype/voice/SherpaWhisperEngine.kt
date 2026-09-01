@@ -15,6 +15,7 @@ class SherpaWhisperEngine(
     decoderPath: String,
     tokensPath: String,
     numThreads: Int = 2,
+    language: String = ModelCatalog.ENGLISH_LANGUAGE,
 ) {
     private val recognizer: OfflineRecognizer
 
@@ -24,7 +25,7 @@ class SherpaWhisperEngine(
                 whisper = OfflineWhisperModelConfig(
                     encoder = encoderPath,
                     decoder = decoderPath,
-                    language = "en",
+                    language = language,
                     task = "transcribe",
                 ),
                 tokens = tokensPath,

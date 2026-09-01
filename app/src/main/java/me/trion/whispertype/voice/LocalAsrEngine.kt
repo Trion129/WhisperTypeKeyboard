@@ -12,6 +12,7 @@ class LocalAsrEngine(private val context: Context) {
     private val prefs = Prefs(context)
     private var engine: SherpaWhisperEngine? = null
     private var loadedModelId: String? = null
+    private var loadedLanguage: String? = null
     private var legacyMaintenanceDone = false
 
     /**
@@ -29,9 +30,10 @@ class LocalAsrEngine(private val context: Context) {
         runLegacyMaintenance()
         val id = prefs.activeModelId
         if (id.isBlank()) return "Install a model in settings"
+        val language = ModelCatalog.effectiveLanguage(id, prefs.transcriptionLanguage)
         val paths = downloader.resolvePaths(id)
         if (paths == null) return "Model files are missing, reinstall in settings"
-        if (engine != null && loadedModelId == id) return null
+        if (engine != null && loadedModelId == id && loadedLanguage == language) return null
         if (engine != null) release()
         return try {
             val (encoder, decoder, tokens) = paths
@@ -39,8 +41,10 @@ class LocalAsrEngine(private val context: Context) {
                 encoderPath = encoder.absolutePath,
                 decoderPath = decoder.absolutePath,
                 tokensPath = tokens.absolutePath,
+                language = language,
             )
             loadedModelId = id
+            loadedLanguage = language
             synchronized(loadedEngines) { loadedEngines.add(this) }
             null
         } catch (e: Exception) {
@@ -77,6 +81,7 @@ class LocalAsrEngine(private val context: Context) {
         engine?.release()
         engine = null
         loadedModelId = null
+        loadedLanguage = null
         synchronized(loadedEngines) { loadedEngines.remove(this) }
     }
 
