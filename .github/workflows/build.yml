@@ -24,6 +24,12 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          # Action default (`tools platform-tools`) is broken: the obsolete
+          # `tools` package no longer exists in the SDK repository
+          # (`Failed to find package 'tools'`). Install only platform-tools
+          # here; platform + build-tools come via sdkmanager below.
+          packages: platform-tools
       - name: Enable KVM access
         run: |
           if [ -e /dev/kvm ]; then
@@ -71,6 +77,9 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
 
       - uses: android-actions/setup-android@v3
+        with:
+          # Same as above: skip the removed `tools` package.
+          packages: platform-tools
 
       - name: Accept licenses
         run: yes | sdkmanager --licenses >/dev/null || true
