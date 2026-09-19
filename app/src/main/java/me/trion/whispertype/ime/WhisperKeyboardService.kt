@@ -75,6 +75,9 @@ class WhisperKeyboardService : InputMethodService() {
         }
         ViewCompat.requestApplyInsets(root)
     }
+
+    override fun onEvaluateFullscreenMode(): Boolean = false
+
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         capturePrimaryClip()
