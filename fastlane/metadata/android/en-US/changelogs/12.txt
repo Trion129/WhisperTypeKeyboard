@@ -1,0 +1,2 @@
+1.5.3: Landscape and symbol fixes.
+Keyboard no longer goes fullscreen in landscape — it stays docked at the bottom with the app visible above. Underscore added to hyphen long-press popups.

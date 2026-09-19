@@ -31,6 +31,12 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Action default (`tools platform-tools`) is broken: the obsolete
+          # `tools` package no longer exists in the SDK repository
+          # (`Failed to find package 'tools'`). Install only platform-tools
+          # here; platform + build-tools come via sdkmanager below.
+          packages: platform-tools
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses >/dev/null || true

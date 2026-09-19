@@ -12,8 +12,8 @@ android {
         minSdk = 26
         targetSdk = 35
         // Keep these as plain literals so F-Droid checkupdates can parse them.
-        versionCode = 11
-        versionName = "1.5.2"
+        versionCode = 12
+        versionName = "1.5.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         splits {
