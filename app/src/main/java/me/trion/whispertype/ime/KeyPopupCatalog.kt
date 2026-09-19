@@ -16,7 +16,7 @@ object KeyPopupCatalog {
     )
 
     private val symbols = mapOf(
-        "-" to listOf("–", "—", "•"),
+        "-" to listOf("_", "–", "—", "•"),
         "/" to listOf("\\", "|"),
         "$" to listOf("¢", "£", "€", "¥", "₹"),
         "%" to listOf("‰"),

@@ -37,7 +37,7 @@ class KeyPopupCatalogTest {
     fun `currency and quotes match the spec`() {
         assertEquals(listOf("¢", "£", "€", "¥", "₹"), KeyPopupCatalog.popupsFor("$"))
         assertEquals(listOf("“", "”", "«", "»"), KeyPopupCatalog.popupsFor("\""))
-        assertEquals(listOf("–", "—", "•"), KeyPopupCatalog.popupsFor("-"))
+        assertEquals(listOf("_", "–", "—", "•"), KeyPopupCatalog.popupsFor("-"))
         assertEquals(listOf("\\", "|"), KeyPopupCatalog.popupsFor("/"))
     }
 
