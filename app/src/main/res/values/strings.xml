@@ -56,7 +56,7 @@
     <string name="error_import_io">Not enough space or write failed</string>
     <string name="model_help">Whisper runs fully offline after install. Download a catalog model or import a sherpa-onnx Whisper zip.</string>
     <string name="model_language_label">Recognition language</string>
-    <string name="model_language_help">Choose Auto-detect, English, or French for a multilingual model. English-only models always use English.</string>
+    <string name="model_language_help">Applies to multilingual models, including imported ones. Auto-detect lets Whisper choose the language; pick one to force it. English-only models always use English.</string>
     <string name="sherpa_models_docs">More Whisper models (for Import): https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html</string>
     <string name="cursor_word_left">⟨ word</string>
     <string name="cursor_left">⟨</string>

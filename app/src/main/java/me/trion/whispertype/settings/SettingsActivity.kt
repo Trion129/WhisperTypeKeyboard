@@ -77,7 +77,7 @@ class SettingsActivity : AppCompatActivity() {
                 position: Int,
                 id: Long
             ) {
-                if (updatingLanguagePicker || !selectedModel().isMultilingual) return
+                if (updatingLanguagePicker || !languageApplies()) return
                 val language = ModelCatalog.languageOptions.getOrNull(position)?.code ?: return
                 if (prefs.transcriptionLanguage == language) return
                 prefs.transcriptionLanguage = language
@@ -162,9 +162,17 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun selectedId(): String = selectedModel().id
 
+    /**
+     * Whether the language choice can affect a model that transcribes: a
+     * multilingual catalog entry is selected, or the active model is a
+     * multilingual one (catalog entries and detected imports alike).
+     */
+    private fun languageApplies(): Boolean =
+        selectedModel().isMultilingual || downloader.isInstalledMultilingual(prefs.activeModelId)
+
     private fun refreshLanguagePicker() {
-        val selected = selectedModel()
-        val language = if (selected.isMultilingual) {
+        val applies = languageApplies()
+        val language = if (applies) {
             prefs.transcriptionLanguage
         } else {
             ModelCatalog.ENGLISH_LANGUAGE
@@ -173,7 +181,7 @@ class SettingsActivity : AppCompatActivity() {
             .coerceAtLeast(0)
         updatingLanguagePicker = true
         try {
-            languagePicker.isEnabled = selected.isMultilingual
+            languagePicker.isEnabled = applies
             languagePicker.setSelection(index)
         } finally {
             updatingLanguagePicker = false

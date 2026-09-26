@@ -9,6 +9,7 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -86,6 +87,14 @@ class ModelDownloader(private val context: Context) {
 
     /** True when the model dir holds all three required files, non-empty. */
     fun isInstalled(id: String): Boolean = isInstalledDir(modelsDir(), id)
+
+    /**
+     * True when the installed model for [id] can transcribe multiple
+     * languages. Catalog entries answer from the catalog; the import slot is
+     * read from the ONNX metadata written by the sherpa Whisper export.
+     */
+    fun isInstalledMultilingual(id: String): Boolean =
+        isInstalledMultilingualDir(modelsDir(), id)
 
     /**
      * Returns (encoder, decoder, tokens) for the given id, or null when any
@@ -275,6 +284,96 @@ class ModelDownloader(private val context: Context) {
             if (!decoder.isFile || decoder.length() == 0L) return null
             if (!tokens.isFile || tokens.length() == 0L) return null
             return Triple(encoder, decoder, tokens)
+        }
+
+        /**
+         * Multilingual flag for an installed model under [dir]. English-only
+         * and unknown models answer false so no language is ever forced on a
+         * model that cannot accept one; the import slot is read from its own
+         * ONNX metadata.
+         */
+        fun isInstalledMultilingualDir(dir: File, id: String): Boolean {
+            if (id != ModelCatalog.IMPORT_ID) {
+                return ModelCatalog.byId(id)?.isMultilingual == true
+            }
+            val paths = resolvePathsIn(dir, id) ?: return false
+            return isMultilingualOnnx(paths.first) || isMultilingualOnnx(paths.second)
+        }
+
+        /** ONNX metadata key the sherpa Whisper export writes as "0"/"1". */
+        const val MULTILINGUAL_METADATA_KEY = "is_multilingual"
+
+        /** The metadata block sits within a few KB of the end of the file. */
+        private const val METADATA_TAIL_BYTES = 64 * 1024
+
+        /**
+         * Reads the `is_multilingual` flag from an ONNX file's metadata.
+         * Missing or unreadable metadata yields false.
+         */
+        fun isMultilingualOnnx(file: File): Boolean =
+            readMetadataValue(file, MULTILINGUAL_METADATA_KEY) == "1"
+
+        /**
+         * Returns the value of the ONNX metadata entry named [key] by scanning
+         * the end of the protobuf file. ONNX stores metadata as repeated
+         * {key, value} string pairs; each string is a length-delimited field
+         * (key: field 1, value: field 2), so the value follows the key bytes.
+         */
+        internal fun readMetadataValue(file: File, key: String): String? {
+            if (!file.isFile || file.length() == 0L) return null
+            val tailSize = minOf(file.length(), METADATA_TAIL_BYTES.toLong()).toInt()
+            val tail = ByteArray(tailSize)
+            try {
+                RandomAccessFile(file, "r").use { raf ->
+                    raf.seek(file.length() - tailSize)
+                    raf.readFully(tail)
+                }
+            } catch (e: Exception) {
+                return null
+            }
+            val needle = key.toByteArray(Charsets.US_ASCII)
+            var searchFrom = 0
+            while (searchFrom <= tail.size - needle.size) {
+                val idx = indexOfBytes(tail, needle, searchFrom) ?: return null
+                readLengthDelimitedString(tail, idx + needle.size)?.let { return it }
+                searchFrom = idx + needle.size
+            }
+            return null
+        }
+
+        /** Parses a length-delimited string (protobuf field 2) at [pos]. */
+        private fun readLengthDelimitedString(buffer: ByteArray, pos: Int): String? {
+            var p = pos
+            if (p >= buffer.size || (buffer[p].toInt() and 0xFF) != 0x12) return null
+            p++
+            var length = 0
+            var shift = 0
+            while (p < buffer.size && shift <= 14) {
+                val b = buffer[p].toInt() and 0xFF
+                p++
+                length = length or ((b and 0x7F) shl shift)
+                if ((b and 0x80) == 0) {
+                    if (length <= 0 || length > 64 || p + length > buffer.size) return null
+                    return String(buffer, p, length, Charsets.UTF_8)
+                }
+                shift += 7
+            }
+            return null
+        }
+
+        private fun indexOfBytes(haystack: ByteArray, needle: ByteArray, from: Int): Int? {
+            if (needle.isEmpty()) return null
+            for (i in from..haystack.size - needle.size) {
+                var match = true
+                for (j in needle.indices) {
+                    if (haystack[i + j] != needle[j]) {
+                        match = false
+                        break
+                    }
+                }
+                if (match) return i
+            }
+            return null
         }
 
         fun purgeLegacyDir(modelsDir: File) {

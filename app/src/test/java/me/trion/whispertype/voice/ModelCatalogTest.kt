@@ -79,14 +79,53 @@ class ModelCatalogTest {
     }
 
     @Test
-    fun `language resolution preserves english-only models`() {
+    fun `language list matches the whisper multilingual set`() {
+        assertEquals(100, ModelCatalog.languageOptions.size)
+        assertEquals(ModelCatalog.AUTO_LANGUAGE, ModelCatalog.languageOptions.first().code)
+        assertEquals(
+            "Language codes must be unique",
+            ModelCatalog.languageOptions.size,
+            ModelCatalog.languageOptions.map { it.code }.toSet().size
+        )
+        for (code in listOf("en", "fr", "de", "es", "zh", "ja", "ru", "ar", "hi", "pt")) {
+            assertTrue("missing $code", ModelCatalog.languageOptions.any { it.code == code })
+        }
+        assertFalse(
+            "yue is large-v3-only and would be fatal for tiny/base/small",
+            ModelCatalog.languageOptions.any { it.code == "yue" }
+        )
+    }
+
+    @Test
+    fun `language resolution follows each model's multilingual support`() {
         assertEquals("", ModelCatalog.normalizeLanguage(""))
         assertEquals("fr", ModelCatalog.normalizeLanguage("fr"))
         assertEquals("", ModelCatalog.normalizeLanguage("not-a-language"))
+        assertEquals("", ModelCatalog.normalizeLanguage("yue"))
         assertEquals("en", ModelCatalog.effectiveLanguage("base.en", "fr"))
         assertEquals("fr", ModelCatalog.effectiveLanguage("base", "fr"))
         assertEquals("", ModelCatalog.effectiveLanguage("base", ""))
-        assertEquals("en", ModelCatalog.effectiveLanguage(ModelCatalog.IMPORT_ID, "fr"))
         assertEquals("en", ModelCatalog.effectiveLanguage("unknown", "fr"))
+        assertEquals(
+            "en",
+            ModelCatalog.effectiveLanguage("base.en", "fr", installedMultilingual = true)
+        )
+        assertEquals("en", ModelCatalog.effectiveLanguage(ModelCatalog.IMPORT_ID, "fr"))
+        assertEquals(
+            "fr",
+            ModelCatalog.effectiveLanguage(
+                ModelCatalog.IMPORT_ID,
+                "fr",
+                installedMultilingual = true
+            )
+        )
+        assertEquals(
+            "",
+            ModelCatalog.effectiveLanguage(
+                ModelCatalog.IMPORT_ID,
+                "",
+                installedMultilingual = true
+            )
+        )
     }
 }

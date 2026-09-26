@@ -5,6 +5,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
@@ -73,6 +74,54 @@ class ModelDownloaderTest {
         assertEquals("tiny", ModelDownloader.detectCatalogId("tiny-encoder.int8.onnx"))
         assertEquals("base", ModelDownloader.detectCatalogId("base-encoder.int8.onnx"))
         assertEquals("small", ModelDownloader.detectCatalogId("small-encoder.int8.onnx"))
+    }
+
+    // Multilingual detection
+
+    @Test
+    fun `onnx metadata reveals multilingual models`() {
+        val multilingual = tempFolder.newFile("multi-encoder.onnx").apply {
+            writeBytes(
+                onnxWithMetadata(
+                    "sot_sequence" to "50258,50259,50359,50363",
+                    "is_multilingual" to "1",
+                    "sot" to "50258"
+                )
+            )
+        }
+        assertTrue(ModelDownloader.isMultilingualOnnx(multilingual))
+
+        val englishOnly = tempFolder.newFile("en-encoder.onnx").apply {
+            writeBytes(onnxWithMetadata("is_multilingual" to "0"))
+        }
+        assertFalse(ModelDownloader.isMultilingualOnnx(englishOnly))
+    }
+
+    @Test
+    fun `onnx without the metadata key is treated as english only`() {
+        val plain = tempFolder.newFile("plain.onnx").apply {
+            writeBytes(onnxWithMetadata("sot" to "50257"))
+        }
+        assertFalse(ModelDownloader.isMultilingualOnnx(plain))
+        assertFalse(ModelDownloader.isMultilingualOnnx(File(tempFolder.root, "missing.onnx")))
+    }
+
+    @Test
+    fun `installed multilingual flag follows catalog entries`() {
+        writeCatalogInstall("base")
+        writeCatalogInstall("base.en")
+        assertTrue(ModelDownloader.isInstalledMultilingualDir(modelsDir, "base"))
+        assertFalse(ModelDownloader.isInstalledMultilingualDir(modelsDir, "base.en"))
+        assertFalse(ModelDownloader.isInstalledMultilingualDir(modelsDir, "unknown"))
+    }
+
+    @Test
+    fun `installed multilingual flag reads the import slot metadata`() {
+        writeImportInstall(multilingualMetadata = true)
+        assertTrue(ModelDownloader.isInstalledMultilingualDir(modelsDir, ModelCatalog.IMPORT_ID))
+
+        writeImportInstall(multilingualMetadata = false)
+        assertFalse(ModelDownloader.isInstalledMultilingualDir(modelsDir, ModelCatalog.IMPORT_ID))
     }
 
     @Test
@@ -280,6 +329,56 @@ class ModelDownloaderTest {
     }
 
     // Helpers
+
+    private fun writeImportInstall(multilingualMetadata: Boolean) {
+        val dir = File(modelsDir, ModelCatalog.IMPORT_ID).apply { mkdirs() }
+        val names = ModelDownloader.requiredFileNames(ModelCatalog.IMPORT_ID)
+        File(dir, names[0]).writeBytes(
+            onnxWithMetadata("is_multilingual" to if (multilingualMetadata) "1" else "0")
+        )
+        File(dir, names[1]).writeBytes(byteArrayOf(1))
+        File(dir, names[2]).writeBytes(byteArrayOf(1))
+    }
+
+    /**
+     * Emulates the metadata tail of an ONNX protobuf: repeated field 14
+     * {key, value} pairs, each a length-delimited string field.
+     */
+    private fun onnxWithMetadata(vararg entries: Pair<String, String>): ByteArray {
+        val out = ByteArrayOutputStream()
+        for ((key, value) in entries) {
+            val entry = ByteArrayOutputStream()
+            writeLengthDelimitedField(entry, 1, key)
+            writeLengthDelimitedField(entry, 2, value)
+            out.write(0x72)
+            writeVarint(out, entry.size())
+            out.write(entry.toByteArray())
+        }
+        return out.toByteArray()
+    }
+
+    private fun writeLengthDelimitedField(
+        out: ByteArrayOutputStream,
+        fieldNumber: Int,
+        value: String,
+    ) {
+        out.write((fieldNumber shl 3) or 2)
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        writeVarint(out, bytes.size)
+        out.write(bytes)
+    }
+
+    private fun writeVarint(out: ByteArrayOutputStream, value: Int) {
+        var v = value
+        while (true) {
+            if ((v and 0x7F.inv()) == 0) {
+                out.write(v)
+                return
+            }
+            out.write((v and 0x7F) or 0x80)
+            v = v ushr 7
+        }
+    }
 
     private fun createZip(vararg entries: Pair<String, String?>): File {
         val zip = tempFolder.newFile("test.zip")

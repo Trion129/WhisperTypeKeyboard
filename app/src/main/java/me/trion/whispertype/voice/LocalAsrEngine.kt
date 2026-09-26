@@ -30,7 +30,11 @@ class LocalAsrEngine(private val context: Context) {
         runLegacyMaintenance()
         val id = prefs.activeModelId
         if (id.isBlank()) return "Install a model in settings"
-        val language = ModelCatalog.effectiveLanguage(id, prefs.transcriptionLanguage)
+        val language = ModelCatalog.effectiveLanguage(
+            id,
+            prefs.transcriptionLanguage,
+            downloader.isInstalledMultilingual(id),
+        )
         val paths = downloader.resolvePaths(id)
         if (paths == null) return "Model files are missing, reinstall in settings"
         if (engine != null && loadedModelId == id && loadedLanguage == language) return null
