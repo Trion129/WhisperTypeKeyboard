@@ -73,6 +73,7 @@ class KeyboardController(
     private var micButton: View? = null
     private var deleteJob: Runnable? = null
     private var transcribeJob: Job? = null
+    private var inputSessionId = 0L
     private var activePopup: PopupWindow? = null
     private var warnedHaptic = false
     private var lastSpaceAt = 0L
@@ -116,19 +117,14 @@ class KeyboardController(
     }
 
     fun onStartInput() {
-        if (!isListening && !isTranscribing) {
-            refreshReadyStatus()
-        }
+        cancelVoiceInput()
+        refreshReadyStatus()
         refreshSuggestions()
         incognitoGlyph.visibility = if (isPrivate()) View.VISIBLE else View.GONE
     }
 
     fun onFinishInput() {
-        if (isListening) {
-            isListening = false
-            micButton?.isSelected = false
-            recorder.cancel()
-        }
+        cancelVoiceInput()
         activePopup?.dismiss()
         activePopup = null
         emojiSearchSession.clear()
@@ -136,16 +132,26 @@ class KeyboardController(
         mode = KeyboardLayout.Mode.LETTERS
         closePanel()
         rebuildKeys()
+        refreshReadyStatus()
     }
 
     fun destroy() {
         deleteJob?.let { mainHandler.removeCallbacks(it) }
-        transcribeJob?.cancel()
+        cancelVoiceInput()
         activePopup?.dismiss()
         activePopup = null
         recorder.onBytes = null
-        recorder.cancel()
         asr.release()
+    }
+
+    private fun cancelVoiceInput() {
+        inputSessionId++
+        transcribeJob?.cancel()
+        transcribeJob = null
+        isListening = false
+        isTranscribing = false
+        micButton?.isSelected = false
+        recorder.cancel()
     }
 
     fun onClipboardChanged() {
@@ -715,16 +721,27 @@ class KeyboardController(
         }
     }
 
-    private fun deleteWord() {
+    private fun deleteWord(wordCount: Int = 1) {
+        if (wordCount <= 0) return
         val ic = inputConnectionProvider() ?: return
         val selected = ic.getSelectedText(0)
         if (!selected.isNullOrEmpty()) {
             ic.commitText("", 1)
             return
         }
-        val before = ic.getTextBeforeCursor(64, 0)?.toString() ?: return
-        val n = TypingRules.previousWordLength(before)
-        if (n > 0) ic.deleteSurroundingText(n, 0)
+        var contextLength = CURRENT_WORD_CONTEXT_LENGTH
+        while (true) {
+            val before = ic.getTextBeforeCursor(contextLength, 0)?.toString() ?: return
+            val n = TypingRules.previousWordsLength(before, wordCount)
+            if (n == 0) return
+            if (n < before.length || before.length < contextLength) {
+                ic.deleteSurroundingText(n, 0)
+                return
+            }
+            // Ask for more context rather than deleting only part of a long word.
+            if (contextLength >= MAX_WORD_DELETE_CONTEXT_LENGTH) return
+            contextLength *= 2
+        }
     }
 
     private fun onMicTapped() {
@@ -791,25 +808,84 @@ class KeyboardController(
             return
         }
 
+        transcribeRecording(wav)
+    }
+
+    private fun transcribeRecording(wav: File) {
+        val sessionId = inputSessionId
+        val connection = inputConnectionProvider()
         transcribeJob = scope.launch {
             val result = withContext(Dispatchers.Default) {
                 asr.transcribeWav(wav)
             }
             withContext(Dispatchers.Main) {
-                isTranscribing = false
-                when (result) {
-                    is LocalAsrEngine.Result.Success -> {
-                        commitDictation(result.text)
-                        refreshReadyStatus()
-                        refreshSuggestions()
-                    }
-                    is LocalAsrEngine.Result.Error -> {
-                        setStatus(result.message, warning = false, showStatus = true)
-                    }
-                }
+                applyTranscriptionResult(result, sessionId, connection)
             }
-            wav.delete()
+        }.also { job ->
+            // Completion also runs if cancellation prevents the coroutine from starting.
+            job.invokeOnCompletion { wav.delete() }
         }
+    }
+
+    private fun applyTranscriptionResult(
+        result: LocalAsrEngine.Result,
+        sessionId: Long,
+        connection: InputConnection?,
+    ) {
+        if (sessionId != inputSessionId) return
+        isTranscribing = false
+        if (connection == null || inputConnectionProvider() !== connection) {
+            refreshReadyStatus()
+            return
+        }
+        when (result) {
+            is LocalAsrEngine.Result.Success -> {
+                handleDictation(result.text)
+                refreshReadyStatus()
+                refreshSuggestions()
+            }
+            is LocalAsrEngine.Result.Error -> {
+                setStatus(result.message, warning = false, showStatus = true)
+            }
+        }
+    }
+
+    private fun handleDictation(text: String) {
+        val command = VoiceCommandParser.parse(text, prefs.voiceCommandPrefix)
+        if (command == null) {
+            commitDictation(text)
+            return
+        }
+
+        when (command.command) {
+            VoiceCommandParser.Command.CLEAR_ALL -> clearAllEditorText()
+            VoiceCommandParser.Command.CLEAR_LAST_WORD -> {
+                if (command.dictationBeforeCommand.isNotBlank()) {
+                    commitDictation(command.dictationBeforeCommand)
+                }
+                deleteWord(command.wordCount)
+            }
+        }
+        performHaptic()
+    }
+
+    private fun clearAllEditorText() {
+        val ic = inputConnectionProvider() ?: return
+        if (!ic.performContextMenuAction(android.R.id.selectAll)) {
+            val now = android.os.SystemClock.uptimeMillis()
+            val downHandled = ic.sendKeyEvent(
+                KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A, 0, KeyEvent.META_CTRL_ON)
+            )
+            val upHandled = ic.sendKeyEvent(
+                KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_A, 0, KeyEvent.META_CTRL_ON)
+            )
+            if (!downHandled || !upHandled || ic.getSelectedText(0).isNullOrEmpty()) return
+            // A host can consume Ctrl+A without selecting all. Preserve a partial selection.
+            val before = ic.getTextBeforeCursor(1, 0) ?: return
+            val after = ic.getTextAfterCursor(1, 0) ?: return
+            if (before.isNotEmpty() || after.isNotEmpty()) return
+        }
+        ic.commitText("", 1)
     }
 
     private fun commitDictation(text: String) {
@@ -1175,6 +1251,7 @@ class KeyboardController(
     }
     private companion object {
         const val CURRENT_WORD_CONTEXT_LENGTH = 64
+        const val MAX_WORD_DELETE_CONTEXT_LENGTH = 65536
         const val SEARCH_PANEL_HEIGHT_DP = 112
         const val BROWSE_PANEL_HEIGHT_DP = 162
     }

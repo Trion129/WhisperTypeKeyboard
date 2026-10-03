@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.Spinner
 import android.widget.TextView
@@ -12,6 +13,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.core.widget.doAfterTextChanged
 import kotlinx.coroutines.launch
 import me.trion.whispertype.R
 import me.trion.whispertype.util.Prefs
@@ -92,6 +94,10 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switch_sentence_caps).apply {
             isChecked = prefs.sentenceCaps
             setOnCheckedChangeListener { _, checked -> prefs.sentenceCaps = checked }
+        }
+        findViewById<EditText>(R.id.input_voice_command_prefix).apply {
+            setText(prefs.voiceCommandPrefix)
+            doAfterTextChanged { text -> prefs.voiceCommandPrefix = text?.toString().orEmpty() }
         }
 
 
