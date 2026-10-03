@@ -17,6 +17,7 @@ This ledger tracks what is done, what is measured, and what stays
 | 1.3 diagnostics | `AsrDiagnostics.kt` + trace hook in `SherpaWhisperEngine`, wired in `LocalAsrEngine` | implemented; adb-toggled, local-only, no text logged; **remove before release** |
 | 1.4 paired baseline | `bench/harness.py`, `bench/fetch_models.sh`, `bench/fetch_fixtures.py`, `bench/README.md`; results in `bench/results/` | harness verified end-to-end |
 | 1.4 on-pipeline arm | `PipelineReplayTest` (androidTest) on emulator | run below |
+| 2.5 candidate arm | `whispercpp` arm in `bench/harness.py` (whisper.cpp `60c0be6`, `ggml-small-q8_0`) | measured on fixtures; **not on-device** |
 | 3.8 preprocessing tests | `WavReaderTest.kt` (15 fixture tests) + `AsrDiagnosticsTest.kt` (3) | passing (144 JVM tests green); release variant compiles |
 
 `WavReaderTest` pins the exact preprocessing semantics the harness
@@ -37,7 +38,11 @@ auto-detect. Mean WER across the 9 clips:
 | app (mirror of installed pipeline) | 0.594 | 0.292 |
 | raw (no peak normalization) | 0.468 | 0.289 |
 | app-nopad (no token-cap retry) | 0.463 | 0.334 |
-| faster-whisper reference | 0.432 | 0.234 |
+| faster-whisper reference (fp16) | 0.432 | 0.234 |
+| whisper.cpp `ggml-small-q8_0` (int8, beam 5) | — | 0.234 |
+
+The whisper.cpp column comes from `bench/results/small-auto-v2`
+(2026-10-03), the same 9 clips, same `app`-mirror samples:
 
 Per-utterance findings (small model):
 
@@ -50,6 +55,17 @@ Per-utterance findings (small model):
 - **faster-whisper shows zero truncations on identical weights** and beats
   the app arm on every affected-language clip — the decoder gap the plan
   describes, reproduced on the same samples with the same size.
+- **whisper.cpp matches the fp16 reference at int8 precision**: 0.234 mean
+  WER / 0.223 CER, 0 truncations, and it is the best arm on the two
+  cap-hitting Hindi clips (`hi_in_1766` 0.375 vs app 0.575; `hi_in_1784`
+  0.25 vs app 0.667 — −35 % and −62 % relative). On English/Spanish it is
+  level with the app arm (one clip each way, single-character differences).
+  Decode p95 is 6.5 s vs the app arm's 24.7 s, because the app's pad retry
+  re-decodes the full 30 s window.
+- `hi_in_1718` (WER 1.0, no cap hit) fails for **every** arm including the
+  fp16 reference: that one is a small-model capability limit, not a
+  decoder or preprocessing defect. Only a larger model can address it, and
+  that is a download-size/product tradeoff, not a bug to fix.
 - **Peak normalization is a real, model-dependent variable**, not a red
   herring: on tiny it produced a repetition collapse (WER 2.18 vs 1.0 raw
   on `hi_in_1766`); on small the difference disappears. The paired arms

@@ -16,6 +16,9 @@ compared per utterance:
   faster - faster-whisper (full OpenAI decoding: beam search + temperature
            fallback) on the SAME normalized samples, same model size/weights.
            Quality reference only, NOT an app dependency.
+  whispercpp - ggml-org/whisper.cpp CLI (the on-device candidate runtime,
+           plan step 5) on the same normalized samples, written out as a
+           16 kHz mono PCM16 wav. Desktop timing is not phone timing.
 
 Everything is local: audio, references and transcripts stay on this machine.
 Only audio metrics and token counts are logged; transcripts are written to
@@ -36,7 +39,10 @@ import dataclasses
 import json
 import re
 import struct
+import subprocess
+import tempfile
 import time
+import wave
 from pathlib import Path
 
 import numpy as np
@@ -272,6 +278,69 @@ class FasterArm:
 
 
 # --------------------------------------------------------------------------
+# whisper.cpp candidate arm (plan step 5: the on-device runtime candidate)
+# --------------------------------------------------------------------------
+
+def write_pcm16_wav(path: Path, samples: np.ndarray, sample_rate: int) -> None:
+    """Whisper.cpp's CLI reads 16 kHz mono 16-bit PCM only."""
+    clipped = np.clip(samples, -1.0, 1.0)
+    pcm = (clipped * 32767.0).astype("<i2")
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        w.writeframes(pcm.tobytes())
+
+
+class WhisperCppArm:
+    """Official ggml-org/whisper.cpp CLI on the same normalized samples.
+
+    Candidate on-device runtime: full Whisper decode loop, beam search with
+    best-of fallback, no sherpa-style token cap. Runs on a PCM16 wav
+    round-trip (the CLI's input format), which is quantization noise far
+    below the model's own variance. Desktop timing is not phone timing."""
+
+    def __init__(self, cli: Path, model: Path, language: str,
+                 beam_size: int = 5, best_of: int = 5, threads: int = 8):
+        self.cli = cli
+        self.model = model
+        self.language = language or "auto"
+        self.beam_size = beam_size
+        self.best_of = best_of
+        self.threads = threads
+        self.tmp = Path(tempfile.mkdtemp(prefix="whispercpp-"))
+        self._n = 0
+
+    def transcribe(self, samples: np.ndarray, sample_rate: int):
+        assert sample_rate == TARGET_SAMPLE_RATE
+        wav_path = self.tmp / f"clip{self._n:04d}.wav"
+        self._n += 1
+        write_pcm16_wav(wav_path, samples, sample_rate)
+        cmd = [
+            str(self.cli),
+            "-m", str(self.model),
+            "-f", str(wav_path),
+            "-l", self.language,
+            "-t", str(self.threads),
+            "-bs", str(self.beam_size),
+            "-bo", str(self.best_of),
+            "-nt",   # no timestamps
+            "-np",   # no prints other than the transcript
+        ]
+        t0 = time.perf_counter()
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"whisper.cpp failed ({proc.returncode}): {proc.stderr[-500:]}"
+            )
+        return {
+            "text": proc.stdout.strip(),
+            "decode_ms": round(elapsed_ms, 1),
+        }
+
+
+# --------------------------------------------------------------------------
 # Scoring
 # --------------------------------------------------------------------------
 
@@ -321,7 +390,7 @@ def percentile(values: list, p: float):
 # Main
 # --------------------------------------------------------------------------
 
-ARMS = ("app", "raw", "app-nopad", "faster")
+ARMS = ("app", "raw", "app-nopad", "faster", "whispercpp")
 
 
 def main() -> None:
@@ -338,6 +407,11 @@ def main() -> None:
                     help=f"comma list from {ARMS}")
     ap.add_argument("--faster-size", default=None,
                     help="faster-whisper size (defaults to --model minus .en)")
+    ap.add_argument("--whispercpp-cli", type=Path, default=None,
+                    help="path to whisper.cpp's whisper-cli binary")
+    ap.add_argument("--whispercpp-model", type=Path, default=None,
+                    help="path to the ggml model (e.g. ggml-small-q8_0.bin)")
+    ap.add_argument("--whispercpp-threads", type=int, default=8)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
@@ -361,9 +435,14 @@ def main() -> None:
                 refs[name.strip()] = text.strip()
 
     faster_size = args.faster_size or args.model.removesuffix(".en")
-    sherpa = sherpa_faster = None
+    sherpa = sherpa_faster = wcpp = None
     if "faster" in arms:
         sherpa_faster = FasterArm(faster_size, args.language)
+    if "whispercpp" in arms:
+        if not args.whispercpp_cli or not args.whispercpp_model:
+            raise SystemExit("whispercpp arm needs --whispercpp-cli and --whispercpp-model")
+        wcpp = WhisperCppArm(args.whispercpp_cli, args.whispercpp_model,
+                             args.language, threads=args.whispercpp_threads)
     if any(a in arms for a in ("app", "raw", "app-nopad")):
         sherpa = SherpaArm(args.sherpa_model_dir, args.model, args.language)
 
@@ -391,6 +470,8 @@ def main() -> None:
             for arm in arms:
                 if arm == "faster":
                     res = sherpa_faster.transcribe(app_samples, TARGET_SAMPLE_RATE)
+                elif arm == "whispercpp":
+                    res = wcpp.transcribe(app_samples, TARGET_SAMPLE_RATE)
                 elif arm == "raw":
                     res = sherpa.transcribe(raw_samples, TARGET_SAMPLE_RATE)
                 elif arm == "app-nopad":
@@ -480,6 +561,9 @@ def build_report(rows: list, arms: list, args, faster_size: str) -> str:
         "- `raw` is identical without WavReader's peak normalization.",
         "- `faster` is the full-decoder reference on the same normalized",
         "  samples; desktop timing says nothing about phone timing.",
+        "- `whispercpp` is ggml-org/whisper.cpp (beam 5, best-of 5) on the",
+        "  same normalized samples through a PCM16 wav round-trip — the",
+        "  on-device candidate runtime, not (yet) an app dependency.",
         "- Decode times here are NOT phone-representative.",
         "",
     ]

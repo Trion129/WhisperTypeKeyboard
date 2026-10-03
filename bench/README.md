@@ -56,6 +56,7 @@ Arms, all on the same audio and same model files:
 | `raw` | resample only, **no peak norm** | same | what normalization does |
 | `app-nopad` | `app` without the pad retry | same | what the retry does |
 | `faster` | `app` samples | faster-whisper, beam 5 | the decoder-quality gap |
+| `whispercpp` | `app` samples (PCM16 wav) | ggml-org/whisper.cpp, beam 5 + best-of 5 | the on-device candidate runtime |
 
 The `app` mirror reproduces, exactly:
 `WavReader.decodePcm` (float channel mean, pinned in `WavReaderTest`),
@@ -94,3 +95,30 @@ transcripts, `first_pass_tokens` vs `token_cap`, and `hit_token_cap`
 should match; timings depend on the host and are not comparable.
 Emulator x86_64 is a stand-in for the *pipeline*, not for phone CPU
 performance — Phase 2's resource gate still needs the target phone.
+
+## whisper.cpp candidate arm (Phase 2 prep)
+
+The `whispercpp` arm runs the on-device candidate runtime on the same
+normalized samples, so its quality can be compared with the `app` and
+`faster` arms before any Android integration. Setup used here:
+
+```bash
+git clone --depth 1 https://github.com/ggml-org/whisper.cpp ~/.cache/whisper-bench/whisper.cpp
+# revision 60c0be6ac8fa71b1a2ae2dd938a31a34a508e774 (2026-10-02)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_TESTS=OFF
+cmake --build build -j
+# ggml-small-q8_0.bin (8-bit, closest to the app's int8 ONNX weights),
+# sha256 49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f
+
+.venv/bin/python bench/harness.py ... --arms app,app-nopad,faster,whispercpp \
+    --whispercpp-cli ~/.cache/whisper-bench/whisper.cpp/build/bin/whisper-cli \
+    --whispercpp-model ~/.cache/whisper-bench/models/ggml-small-q8_0.bin \
+    --out bench/results/small-auto-v2
+```
+
+Decoding settings: `-l auto` (or the forced language), threads from
+`--whispercpp-threads` (default 8), beam 5 with best-of 5, no timestamps.
+The audio goes through a 16 kHz mono PCM16 wav because that is the CLI's
+input format; quantization noise is far below the model's own variance.
+Compare only same-size, same-language runs — `ggml-small` against the
+app's `small-{encoder,decoder}.int8.onnx`, not against `tiny`.
