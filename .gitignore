@@ -25,5 +25,8 @@ __pycache__/
 
 # Local-only bench audio, references and results (never commit recordings)
 bench/fixtures/
+bench/fixtures-phone/
 bench/results/
+docs/quality/phone-diag.log
+docs/quality/phone-state.txt
 .kotlin/
