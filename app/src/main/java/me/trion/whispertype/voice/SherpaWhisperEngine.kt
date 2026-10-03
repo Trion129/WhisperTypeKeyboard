@@ -20,6 +20,24 @@ class SherpaWhisperEngine(
 ) {
     private val recognizer: OfflineRecognizer
 
+    /** What one [transcribe] call did, in decoder terms. Contains no text. */
+    data class Trace(
+        val sampleCount: Int,
+        val sampleRate: Int,
+        val firstPassTokens: Int,
+        val tokenCap: Int,
+        val hitTokenCap: Boolean,
+        val retriedPadded: Boolean,
+        val firstDecodeMs: Long,
+        val retryDecodeMs: Long,
+    )
+
+    /**
+     * Optional trace sink for the temporary local-only diagnostics path
+     * (AsrDiagnostics) and the pipeline replay test. Null when nobody listens.
+     */
+    var onTrace: ((Trace) -> Unit)? = null
+
     init {
         val config = OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
@@ -51,12 +69,32 @@ class SherpaWhisperEngine(
      * single-pass path.
      */
     fun transcribe(samples: FloatArray, sampleRate: Int = 16000): String {
+        val firstStart = System.nanoTime()
         val first = decode(samples, sampleRate)
-        if (!shouldRetryInFullWindow(first, samples.size, sampleRate)) {
-            return correctText(first.text)
+        val firstDecodeMs = (System.nanoTime() - firstStart) / 1_000_000L
+        val retry = shouldRetryInFullWindow(first, samples.size, sampleRate)
+        var retryDecodeMs = 0L
+        val text = if (retry) {
+            val retryStart = System.nanoTime()
+            val retried = decode(padToWhisperWindow(samples, sampleRate), sampleRate)
+            retryDecodeMs = (System.nanoTime() - retryStart) / 1_000_000L
+            if (retried.text.isBlank()) first.text else retried.text
+        } else {
+            first.text
         }
-        val retried = decode(padToWhisperWindow(samples, sampleRate), sampleRate)
-        return correctText(if (retried.text.isBlank()) first.text else retried.text)
+        onTrace?.invoke(
+            Trace(
+                sampleCount = samples.size,
+                sampleRate = sampleRate,
+                firstPassTokens = first.tokens.size,
+                tokenCap = decoderTokenCap(samples.size, sampleRate),
+                hitTokenCap = retry,
+                retriedPadded = retry,
+                firstDecodeMs = firstDecodeMs,
+                retryDecodeMs = retryDecodeMs,
+            )
+        )
+        return correctText(text)
     }
 
     private fun decode(samples: FloatArray, sampleRate: Int): OfflineRecognizerResult {

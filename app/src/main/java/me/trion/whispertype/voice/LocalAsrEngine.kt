@@ -71,6 +71,15 @@ class LocalAsrEngine(private val context: Context) {
     fun transcribeWav(wavFile: File): Result = synchronized(engineLock) {
         val loadError = ensureLoaded()
         if (loadError != null) return Result.Error(loadError)
+        // TEMPORARY local-only diagnostics (remove with AsrDiagnostics before
+        // release): metrics + audio copy, never transcription text.
+        val diagnosticsOn = AsrDiagnostics.enabled(context)
+        val activeEngine = engine
+        activeEngine?.onTrace =
+            if (diagnosticsOn) ({ AsrDiagnostics.onEngineTrace(it) }) else null
+        if (diagnosticsOn) {
+            AsrDiagnostics.onRecordingCaptured(context, wavFile, loadedModelId, loadedLanguage)
+        }
         return try {
             val wav = WavReader.read(wavFile)
             val text = engine!!.transcribe(wav.samples, wav.sampleRate)
