@@ -15,7 +15,7 @@ all speech recognition runs on-device.
 | Suggestions | On-device English wordlist + local learned words; incognito toggle |
 | Emoji | Categorized Unicode picker with search, recents, and skin tones (`😀`) |
 | Clipboard | Last 20 text clips, captured while WhisperType is enabled, tap to paste, swipe or × to delete |
-| Voice | Offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); 25s warning, auto-stop at 30s |
+| Voice | Offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); 25s warning, auto-stop at 30s; voice commands can clear the current field or previous word |
 | Models | `tiny.en` / `base.en` (default, ~161 MB) / `small.en` int8; import a custom sherpa Whisper zip |
 | Privacy | No API keys — audio, clipboard, and learned words stay on the device |
 
@@ -36,6 +36,15 @@ the 30s auto-stop); the **gear** opens settings; **long-press** keys for
 accents and symbols; `😀` opens the emoji picker; the clipboard chip opens
 history.
 
+During voice dictation, say the configured command prefix (default **“Whispy”**)
+followed by **“clear”** to delete the word before the cursor, or **“clear all”**
+to clear the active text field. Repeat **“clear”** to delete more words:
+**“Whispy clear clear”** deletes the last two words, and
+**“Whispy clear clear clear”** deletes the last three. Each “clear” counts once.
+The command prefix can be edited in Settings.
+Commands are handled after the recording is transcribed, when you tap the mic
+again or recording auto-stops.
+
 ## Build
 
 ```bash
@@ -45,10 +54,21 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Requirements:
 
-- JDK 17+
+- JDK 17
 - Android SDK
 - minSdk 26
 - Network access once at build time for the JitPack sherpa-onnx artifact
+
+Run automated checks with:
+
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
+The voice command tests pass recognized speech through the keyboard controller
+and a real Android `EditText` using Robolectric. They cover repeated clears,
+cursor placement, selections, custom prefixes, and clear-all behavior. Check
+microphone transcription on an Android device with an installed speech model.
 
 Release splits (optional, local):
 

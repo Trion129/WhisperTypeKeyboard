@@ -28,6 +28,11 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean(KEY_SENTENCE_CAPS, true)
         set(value) = prefs.edit().putBoolean(KEY_SENTENCE_CAPS, value).apply()
 
+    var voiceCommandPrefix: String
+        get() = prefs.getString(KEY_VOICE_COMMAND_PREFIX, DEFAULT_VOICE_COMMAND_PREFIX)
+            ?: DEFAULT_VOICE_COMMAND_PREFIX
+        set(value) = prefs.edit().putString(KEY_VOICE_COMMAND_PREFIX, value.trim()).apply()
+
     var activeModelId: String
         get() = prefs.getString(KEY_ACTIVE_MODEL_ID, "") ?: ""
         set(value) = prefs.edit().putString(KEY_ACTIVE_MODEL_ID, value).apply()
@@ -63,8 +68,11 @@ class Prefs(context: Context) {
         const val KEY_INCOGNITO = "incognito"
         const val KEY_DOUBLE_SPACE_PERIOD = "double_space_period"
         const val KEY_SENTENCE_CAPS = "sentence_caps"
+        const val KEY_VOICE_COMMAND_PREFIX = "voice_command_prefix"
         const val KEY_ACTIVE_MODEL_ID = "active_model_id"
         const val KEY_EMOJI_RECENTS = "emoji_recents"
+
+        const val DEFAULT_VOICE_COMMAND_PREFIX = "Whispy"
 
         // Legacy key from the RTranslator pipeline; only referenced by migrate().
         private const val KEY_MODEL_SOURCE = "model_source"

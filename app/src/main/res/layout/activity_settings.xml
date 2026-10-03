@@ -146,5 +146,32 @@
             android:paddingVertical="8dp"
             android:text="@string/pref_sentence_caps"
             android:textColor="@color/on_surface" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/pref_voice_command_prefix"
+            android:textColor="@color/on_surface"
+            android:textSize="16sp" />
+
+        <EditText
+            android:id="@+id/input_voice_command_prefix"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:inputType="textCapWords"
+            android:importantForAutofill="no"
+            android:imeOptions="actionDone"
+            android:hint="@string/pref_voice_command_prefix_hint"
+            android:textColor="@color/on_surface" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:text="@string/pref_voice_command_prefix_help"
+            android:textColor="@color/key_text_secondary"
+            android:textSize="13sp" />
     </LinearLayout>
 </ScrollView>

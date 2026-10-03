@@ -17,12 +17,16 @@ object TypingRules {
         return trimmed.last() in ".?!"
     }
 
-    fun previousWordLength(textBeforeCursor: String): Int {
-        if (textBeforeCursor.isEmpty()) return 0
+    fun previousWordLength(textBeforeCursor: String): Int = previousWordsLength(textBeforeCursor, 1)
+
+    fun previousWordsLength(textBeforeCursor: String, wordCount: Int): Int {
+        if (wordCount <= 0 || textBeforeCursor.isEmpty()) return 0
         var i = textBeforeCursor.length
-        while (i > 0 && textBeforeCursor[i - 1].isWhitespace()) i--
-        val wordEnd = i
-        while (i > 0 && !textBeforeCursor[i - 1].isWhitespace()) i--
+        repeat(wordCount) {
+            while (i > 0 && textBeforeCursor[i - 1].isWhitespace()) i--
+            while (i > 0 && !textBeforeCursor[i - 1].isWhitespace()) i--
+            if (i == 0) return textBeforeCursor.length
+        }
         return textBeforeCursor.length - i
     }
 

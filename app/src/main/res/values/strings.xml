@@ -25,6 +25,9 @@
     <string name="pref_incognito">Incognito (no learning or clipboard capture)</string>
     <string name="pref_double_space">Double-space period</string>
     <string name="pref_sentence_caps">Auto-capitalize sentences</string>
+    <string name="pref_voice_command_prefix">Voice command prefix</string>
+    <string name="pref_voice_command_prefix_hint">Whispy</string>
+    <string name="pref_voice_command_prefix_help">Say this phrase before “clear” to delete one word, “clear clear” for two words, or “clear all” for the whole field. Repeat “clear” for each word to delete. Leave the prefix blank to turn voice commands off.</string>
     <string name="status_listening">Listening…</string>
     <string name="status_listening_timer">Listening · %1$ds · %2$ds left</string>
     <string name="status_transcribing">Transcribing on-device…</string>

@@ -48,6 +48,17 @@ class TypingRulesTest {
     }
 
     @Test
+    fun `multiple word deletion includes spaces and stops at available text`() {
+        assertEquals("i wish ".length, TypingRules.previousWordsLength("but i wish ", 2))
+        assertEquals("i\t\twish\n".length, TypingRules.previousWordsLength("but i\t\twish\n", 2))
+        assertEquals("good day.".length, TypingRules.previousWordsLength("a good day.", 2))
+        assertEquals("hello world ".length, TypingRules.previousWordsLength("hello world ", 10))
+        assertEquals(0, TypingRules.previousWordsLength("", 2))
+        assertEquals(0, TypingRules.previousWordsLength("hello", 0))
+        assertEquals(0, TypingRules.previousWordsLength("hello", -1))
+    }
+
+    @Test
     fun `ascii letter deletes one unit`() {
         assertEquals(1, TypingRules.previousGraphemeLength("hello"))
         assertEquals(0, TypingRules.previousGraphemeLength(""))
