@@ -50,11 +50,15 @@ object AsrDiagnostics {
      * recording to public storage for later desktop replay.
      */
     fun onRecordingCaptured(context: Context, wavFile: File, modelId: String?, language: String?) {
-        runCatching {
-            val metrics = pcm16Metrics(wavFile)
-            Log.i(TAG, "capture file=${wavFile.name} model=$modelId language=$language $metrics")
-            copyRecording(context, wavFile)
-        }
+        val metrics = runCatching { pcm16Metrics(wavFile).toString() }
+            .getOrElse { "metrics unavailable: $it" }
+        Log.i(
+            TAG,
+            "capture file=${wavFile.name} model=$modelId " +
+                "language=${language?.takeIf { it.isNotBlank() } ?: "auto"} $metrics"
+        )
+        runCatching { copyRecording(context, wavFile) }
+            .onFailure { Log.w(TAG, "copy crashed", it) }
     }
 
     /** Trace sink for [SherpaWhisperEngine.onTrace]. */
@@ -163,7 +167,11 @@ object AsrDiagnostics {
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val resolver = context.contentResolver
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if (uri == null) {
+            Log.w(TAG, "copy skipped: MediaStore insert returned null")
+            return
+        }
         try {
             resolver.openOutputStream(uri)?.use { out ->
                 wavFile.inputStream().use { it.copyTo(out) }
@@ -174,7 +182,9 @@ object AsrDiagnostics {
                 null,
                 null
             )
+            Log.i(TAG, "copied ${wavFile.name} -> $uri")
         } catch (e: Exception) {
+            Log.w(TAG, "copy failed for ${wavFile.name}", e)
             resolver.delete(uri, null, null)
         }
     }
