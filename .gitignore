@@ -22,3 +22,8 @@ third_party/
 
 __pycache__/
 *.pyc
+
+# Local-only bench audio, references and results (never commit recordings)
+bench/fixtures/
+bench/results/
+.kotlin/
