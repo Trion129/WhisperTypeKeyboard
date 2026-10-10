@@ -91,7 +91,6 @@ class PipelineReplayTest {
                         row.put("first_pass_tokens", t.firstPassTokens)
                             .put("token_cap", t.tokenCap)
                             .put("hit_token_cap", t.hitTokenCap)
-                            .put("retried_padded", t.retriedPadded)
                             .put("first_decode_ms", t.firstDecodeMs)
                             .put("retry_decode_ms", t.retryDecodeMs)
                     }

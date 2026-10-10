@@ -67,7 +67,7 @@ object AsrDiagnostics {
             TAG,
             "decode samples=${trace.sampleCount} firstPassTokens=${trace.firstPassTokens} " +
                 "tokenCap=${trace.tokenCap} hitTokenCap=${trace.hitTokenCap} " +
-                "retriedPadded=${trace.retriedPadded} firstDecodeMs=${trace.firstDecodeMs} " +
+                "firstDecodeMs=${trace.firstDecodeMs} " +
                 "retryDecodeMs=${trace.retryDecodeMs}"
         )
     }

@@ -33,6 +33,20 @@ class SherpaWhisperEngineTest {
     }
 
     @Test
+    fun `token cap follows the rounded fbank frame count, not raw seconds`() {
+        // Measured with sherpa-onnx v1.13.4 tiny on FLEURS Hindi: 53_340
+        // samples (333.375 frames -> 333) and 45_340 (283.375 -> 283) stopped
+        // at 19 / 16 tokens, one under raw seconds; 45_439 (283.99 -> 284)
+        // and 157_439 (983.99 -> 984) reached 17 / 59.
+        assertEquals(19, SherpaWhisperEngine.decoderTokenCap(53_340, 16_000))
+        assertEquals(16, SherpaWhisperEngine.decoderTokenCap(45_340, 16_000))
+        assertEquals(17, SherpaWhisperEngine.decoderTokenCap(45_439, 16_000))
+        assertEquals(59, SherpaWhisperEngine.decoderTokenCap(157_439, 16_000))
+        // Clamped at sherpa's 2950-frame input limit.
+        assertEquals(177, SherpaWhisperEngine.decoderTokenCap(600_000, 16_000))
+    }
+
+    @Test
     fun `retry triggers when the decoder stopped at its token cap`() {
         val nineSeconds = 145_600
         assertTrue(
@@ -63,12 +77,23 @@ class SherpaWhisperEngineTest {
         assertFalse(
             SherpaWhisperEngine.shouldRetryInFullWindow(resultWith(0), 145_600, 16_000)
         )
-        // 30 s of audio already uses the largest window sherpa decodes.
+        // 29.49 s of audio already uses the largest window sherpa decodes.
         assertFalse(
             SherpaWhisperEngine.shouldRetryInFullWindow(
-                resultWith(500), 480_000, 16_000
+                resultWith(500), 471_840, 16_000
             )
         )
+    }
+
+    @Test
+    fun `padded retry replaces the first pass only when it decoded more`() {
+        val capped = resultWith(58)
+        // Measured on tiny/Hindi: a capped 58-token pass, padded retry gave 11.
+        assertSame(capped, SherpaWhisperEngine.preferLonger(capped, resultWith(11)))
+        assertSame(capped, SherpaWhisperEngine.preferLonger(capped, resultWith(58)))
+        assertSame(capped, SherpaWhisperEngine.preferLonger(capped, resultWith(0)))
+        val longer = resultWith(90)
+        assertSame(longer, SherpaWhisperEngine.preferLonger(capped, longer))
     }
 
     @Test
@@ -76,19 +101,19 @@ class SherpaWhisperEngineTest {
         val oneSecond = FloatArray(16_000) { 0.25f }
         val padded = SherpaWhisperEngine.padToWhisperWindow(oneSecond, 16_000)
 
-        assertEquals(480_000, padded.size)
+        assertEquals(471_840, padded.size)
         assertEquals(0.25f, padded[0])
         assertEquals(0.25f, padded[15_999])
         assertEquals(0f, padded[16_000])
-        assertEquals(0f, padded[479_999])
+        assertEquals(0f, padded[471_839])
     }
 
     @Test
     fun `padding leaves long audio untouched`() {
-        val thirtySeconds = FloatArray(480_000)
+        val window = FloatArray(471_840)
         assertSame(
-            thirtySeconds,
-            SherpaWhisperEngine.padToWhisperWindow(thirtySeconds, 16_000)
+            window,
+            SherpaWhisperEngine.padToWhisperWindow(window, 16_000)
         )
     }
 }

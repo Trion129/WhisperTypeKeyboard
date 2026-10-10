@@ -120,7 +120,14 @@ class ModelDownloaderTest {
         writeImportInstall(multilingualMetadata = true)
         assertTrue(ModelDownloader.isInstalledMultilingualDir(modelsDir, ModelCatalog.IMPORT_ID))
 
+        // Same byte length, so the cache can only notice the rewrite via mtime.
+        val encoder = File(
+            File(modelsDir, ModelCatalog.IMPORT_ID),
+            ModelDownloader.requiredFileNames(ModelCatalog.IMPORT_ID)[0],
+        )
+        val before = encoder.lastModified()
         writeImportInstall(multilingualMetadata = false)
+        encoder.setLastModified(before + 2000)
         assertFalse(ModelDownloader.isInstalledMultilingualDir(modelsDir, ModelCatalog.IMPORT_ID))
     }
 

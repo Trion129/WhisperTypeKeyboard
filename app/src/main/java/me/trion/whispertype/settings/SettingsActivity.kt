@@ -31,7 +31,6 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var btnDelete: Button
     private lateinit var progress: ProgressBar
     private var busy = false
-    private var updatingLanguagePicker = false
 
     private val importLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -77,7 +76,7 @@ class SettingsActivity : AppCompatActivity() {
                 position: Int,
                 id: Long
             ) {
-                if (updatingLanguagePicker || !languageApplies()) return
+                if (!languageApplies()) return
                 val language = ModelCatalog.languageOptions.getOrNull(position)?.code ?: return
                 if (prefs.transcriptionLanguage == language) return
                 prefs.transcriptionLanguage = language
@@ -179,13 +178,8 @@ class SettingsActivity : AppCompatActivity() {
         }
         val index = ModelCatalog.languageOptions.indexOfFirst { it.code == language }
             .coerceAtLeast(0)
-        updatingLanguagePicker = true
-        try {
-            languagePicker.isEnabled = applies
-            languagePicker.setSelection(index)
-        } finally {
-            updatingLanguagePicker = false
-        }
+        languagePicker.isEnabled = applies
+        languagePicker.setSelection(index)
     }
 
     private fun refreshUi() {

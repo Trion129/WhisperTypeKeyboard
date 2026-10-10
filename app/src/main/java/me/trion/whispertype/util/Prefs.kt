@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.preference.PreferenceManager
 import me.trion.whispertype.voice.ModelCatalog
+
 class Prefs(context: Context) {
     private val prefs: SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(context.applicationContext)

@@ -289,15 +289,48 @@ class ModelDownloader(private val context: Context) {
         /**
          * Multilingual flag for an installed model under [dir]. English-only
          * and unknown models answer false so no language is ever forced on a
-         * model that cannot accept one; the import slot is read from its own
-         * ONNX metadata.
+         * model that cannot accept one. The import slot is read from its
+         * encoder ONNX metadata: the sherpa export writes `is_multilingual`
+         * only there, never into the decoder.
          */
         fun isInstalledMultilingualDir(dir: File, id: String): Boolean {
             if (id != ModelCatalog.IMPORT_ID) {
                 return ModelCatalog.byId(id)?.isMultilingual == true
             }
             val paths = resolvePathsIn(dir, id) ?: return false
-            return isMultilingualOnnx(paths.first) || isMultilingualOnnx(paths.second)
+            return cachedImportMultilingual(paths.first)
+        }
+
+        /** Single-entry memo of the import encoder's metadata flag. */
+        private class CachedMultilingual(
+            val path: String,
+            val length: Long,
+            val lastModified: Long,
+            val result: Boolean,
+        )
+
+        private val multilingualCacheLock = Any()
+        private var multilingualCache: CachedMultilingual? = null
+
+        /**
+         * Reuses the last read result while the encoder's path, length and
+         * mtime are unchanged; otherwise re-reads and replaces the entry.
+         */
+        private fun cachedImportMultilingual(encoder: File): Boolean {
+            val path = encoder.absolutePath
+            val length = encoder.length()
+            val lastModified = encoder.lastModified()
+            synchronized(multilingualCacheLock) {
+                val hit = multilingualCache
+                if (hit != null && hit.path == path &&
+                    hit.length == length && hit.lastModified == lastModified
+                ) {
+                    return hit.result
+                }
+                val result = isMultilingualOnnx(encoder)
+                multilingualCache = CachedMultilingual(path, length, lastModified, result)
+                return result
+            }
         }
 
         /** ONNX metadata key the sherpa Whisper export writes as "0"/"1". */

@@ -27,7 +27,6 @@ class SherpaWhisperEngine(
         val firstPassTokens: Int,
         val tokenCap: Int,
         val hitTokenCap: Boolean,
-        val retriedPadded: Boolean,
         val firstDecodeMs: Long,
         val retryDecodeMs: Long,
     )
@@ -63,10 +62,12 @@ class SherpaWhisperEngine(
      * sherpa-onnx stops the Whisper decoder once it has produced six tokens
      * per second of audio, which cuts off scripts that need more than that
      * (Devanagari, Tamil, Chinese, ...) mid-sentence. When the decode
-     * provably hit that cap, re-run the same audio padded to Whisper's full
-     * 30 s window, where the cap is large enough for those scripts. English
-     * and other low-token scripts never hit the cap, so they keep the faster
-     * single-pass path.
+     * provably hit that cap, re-run the same audio padded to sherpa's maximum
+     * input (~29.5 s), where the cap is large enough for those scripts. The
+     * retry wins only when it produced more tokens: an untruncated decode is
+     * always longer than a capped one, while a shorter retry means padding
+     * made the model stop early. English and other low-token scripts never
+     * hit the cap, so they keep the faster single-pass path.
      */
     fun transcribe(samples: FloatArray, sampleRate: Int = 16000): String {
         val firstStart = System.nanoTime()
@@ -78,7 +79,7 @@ class SherpaWhisperEngine(
             val retryStart = System.nanoTime()
             val retried = decode(padToWhisperWindow(samples, sampleRate), sampleRate)
             retryDecodeMs = (System.nanoTime() - retryStart) / 1_000_000L
-            if (retried.text.isBlank()) first.text else retried.text
+            preferLonger(first, retried).text
         } else {
             first.text
         }
@@ -89,7 +90,6 @@ class SherpaWhisperEngine(
                 firstPassTokens = first.tokens.size,
                 tokenCap = decoderTokenCap(samples.size, sampleRate),
                 hitTokenCap = retry,
-                retriedPadded = retry,
                 firstDecodeMs = firstDecodeMs,
                 retryDecodeMs = retryDecodeMs,
             )
@@ -121,17 +121,33 @@ class SherpaWhisperEngine(
     }
 
     companion object {
-        /** Whisper's native window: the longest span sherpa decodes at once. */
-        private const val WINDOW_SECONDS = 30
+        /**
+         * sherpa-onnx clamps input to 2950 feature frames (29.5 s of 10 ms
+         * hops) and logs "Only waves less than 30 seconds are supported" once
+         * the input reaches that many frames. See
+         * offline-recognizer-whisper-impl.h (`max_num_frames - 50`).
+         */
+        private const val MAX_FRAMES = 2950
 
         /**
-         * sherpa-onnx decodes at most `frames / 100 * 6` tokens
-         * (offline-whisper-greedy-search-decoder.cc: "assume at most 6 tokens
-         * per second"). With 10 ms feature hops `frames / 100` is just the
-         * audio duration in seconds.
+         * Longest span sherpa decodes without truncating or warning, in
+         * samples: one frame under [MAX_FRAMES] (29.49 s).
          */
-        internal fun decoderTokenCap(sampleCount: Int, sampleRate: Int): Int =
-            (sampleCount.toDouble() / sampleRate * 6).toInt()
+        internal fun whisperWindowSamples(sampleRate: Int): Int =
+            (MAX_FRAMES - 1) * sampleRate / 100
+
+        /**
+         * sherpa-onnx decodes at most `num_frames / 100.0 * 6` tokens
+         * (offline-whisper-greedy-search-decoder.cc: "assume at most 6 tokens
+         * per second"). The Whisper fbank yields round-half-up(samples / hop)
+         * 10 ms frames (kaldi-native-fbank WhisperFeatureOptions), clamped to
+         * [MAX_FRAMES]. Using raw seconds instead overshoots by one token for
+         * lengths just past a frame boundary, and the retry never fires there.
+         */
+        internal fun decoderTokenCap(sampleCount: Int, sampleRate: Int): Int {
+            val frames = (sampleCount.toLong() * 100 + sampleRate / 2) / sampleRate
+            return (minOf(frames, MAX_FRAMES.toLong()) * 6 / 100).toInt()
+        }
 
         /**
          * True when the transcript stopped because the decoder ran out of
@@ -144,13 +160,23 @@ class SherpaWhisperEngine(
             sampleRate: Int,
         ): Boolean {
             if (result.tokens.isEmpty()) return false
-            if (sampleCount >= WINDOW_SECONDS * sampleRate) return false
+            if (sampleCount >= whisperWindowSamples(sampleRate)) return false
             return result.tokens.size >= decoderTokenCap(sampleCount, sampleRate)
         }
 
-        /** Extends [samples] with trailing silence up to Whisper's window. */
+        /**
+         * Picks the padded [retried] result only when it decoded more tokens
+         * than the capped [first] pass; otherwise the longer first pass stays.
+         */
+        internal fun preferLonger(
+            first: OfflineRecognizerResult,
+            retried: OfflineRecognizerResult,
+        ): OfflineRecognizerResult =
+            if (retried.tokens.size > first.tokens.size) retried else first
+
+        /** Extends [samples] with trailing silence up to [whisperWindowSamples]. */
         internal fun padToWhisperWindow(samples: FloatArray, sampleRate: Int): FloatArray {
-            val window = WINDOW_SECONDS * sampleRate
+            val window = whisperWindowSamples(sampleRate)
             return if (samples.size >= window) samples else samples.copyOf(window)
         }
     }
