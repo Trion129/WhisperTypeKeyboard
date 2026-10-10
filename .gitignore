@@ -30,3 +30,5 @@ bench/results/
 docs/quality/phone-diag.log
 docs/quality/phone-state.txt
 .kotlin/
+# host replay symlinks (bench/host_replay.sh)
+app/src/test/jniLibs/

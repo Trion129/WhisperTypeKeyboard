@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
-import re
 import struct
 import subprocess
 import tempfile
@@ -48,9 +47,19 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from scoring import error_rates, percentile
+
 TARGET_SAMPLE_RATE = 16_000
-WINDOW_SECONDS = 30
+# sherpa clamps input to 2950 feature frames (10 ms hops = 29.5 s) and warns
+# once input reaches that; see offline-recognizer-whisper-impl.h
+# (`max_num_frames - 50`).
+MAX_FRAMES = 2950
 SUPPORTED_BITS = (8, 16)
+
+
+def window_samples(sample_rate: int) -> int:
+    # One frame under MAX_FRAMES: longest input sherpa takes without warning.
+    return (MAX_FRAMES - 1) * sample_rate // 100
 
 
 # --------------------------------------------------------------------------
@@ -196,8 +205,10 @@ class SherpaArm:
 
     @staticmethod
     def decoder_token_cap(sample_count: int, sample_rate: int) -> int:
-        # SherpaWhisperEngine.decoderTokenCap: frames/100 * 6.
-        return int(sample_count / sample_rate * 6)
+        # SherpaWhisperEngine.decoderTokenCap: round-half-up fbank frames,
+        # clamped to MAX_FRAMES, times 6 tokens per 100 frames.
+        frames = min((sample_count * 100 + sample_rate // 2) // sample_rate, MAX_FRAMES)
+        return frames * 6 // 100
 
     def _decode(self, samples: np.ndarray, sample_rate: int):
         stream = self.recognizer.create_stream()
@@ -217,26 +228,25 @@ class SherpaArm:
         """Mirror of SherpaWhisperEngine.transcribe including the retry."""
         first_text, first_tokens, first_ms = self._decode(samples, sample_rate)
         cap = self.decoder_token_cap(samples.size, sample_rate)
-        hit_cap = bool(first_tokens) and samples.size < WINDOW_SECONDS * sample_rate \
+        hit_cap = bool(first_tokens) and samples.size < window_samples(sample_rate) \
             and len(first_tokens) >= cap
-        retried = False
         total_ms = first_ms
         final_text, final_tokens = first_text, first_tokens
         if hit_cap and retry_enabled:
-            window = WINDOW_SECONDS * sample_rate
+            window = window_samples(sample_rate)
             padded = samples if samples.size >= window else np.pad(
                 samples, (0, window - samples.size)).astype(np.float32)
             retry_text, retry_tokens, retry_ms = self._decode(padded, sample_rate)
-            retried = True
             total_ms += retry_ms
-            final_text = first_text if not retry_text.strip() else retry_text
-            final_tokens = retry_tokens if retry_text.strip() else first_tokens
+            # SherpaWhisperEngine.preferLonger: a capped first pass is kept
+            # unless the padded retry produced strictly more tokens.
+            if len(retry_tokens) > len(first_tokens):
+                final_text, final_tokens = retry_text, retry_tokens
         return {
             "text": final_text.strip(),
             "first_pass_tokens": len(first_tokens),
             "token_cap": cap,
             "hit_token_cap": hit_cap,
-            "retried_padded": retried,
             "final_tokens": len(final_tokens),
             "decode_ms": round(total_ms, 1),
         }
@@ -338,52 +348,6 @@ class WhisperCppArm:
             "text": proc.stdout.strip(),
             "decode_ms": round(elapsed_ms, 1),
         }
-
-
-# --------------------------------------------------------------------------
-# Scoring
-# --------------------------------------------------------------------------
-
-_PUNCT = re.compile(r"[^\w\s]|_", re.UNICODE)
-
-
-def normalize_text(text: str) -> str:
-    text = _PUNCT.sub(" ", text.lower())
-    return " ".join(text.split())
-
-
-def levenshtein(a: list, b: list) -> int:
-    if not a:
-        return len(b)
-    if not b:
-        return len(a)
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        cur = [i]
-        for j, cb in enumerate(b, 1):
-            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
-        prev = cur
-    return prev[-1]
-
-
-def error_rates(reference: str, hypothesis: str) -> dict:
-    ref_n = normalize_text(reference)
-    hyp_n = normalize_text(hypothesis)
-    if not ref_n:
-        return {"wer": None, "cer": None, "ref_words": 0}
-    ref_w, hyp_w = ref_n.split(), hyp_n.split()
-    wer = levenshtein(ref_w, hyp_w) / len(ref_w)
-    ref_c, hyp_c = list(ref_n.replace(" ", "")), list(hyp_n.replace(" ", ""))
-    cer = levenshtein(ref_c, hyp_c) / max(len(ref_c), 1)
-    return {"wer": round(wer, 4), "cer": round(cer, 4), "ref_words": len(ref_w)}
-
-
-def percentile(values: list, p: float):
-    if not values:
-        return None
-    s = sorted(values)
-    k = min(len(s) - 1, max(0, round(p / 100.0 * (len(s) - 1))))
-    return s[k]
 
 
 # --------------------------------------------------------------------------

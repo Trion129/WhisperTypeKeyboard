@@ -97,6 +97,15 @@ androidComponents {
     }
 }
 
+// Opt-in host replay (bench/host_replay.sh): forwards -Pwhispertype.host.* to
+// the unit-test JVM; HostPipelineReplayTest skips when they are absent.
+tasks.withType<Test>().configureEach {
+    listOf("model", "modelDir", "language", "fixtures", "out").forEach { key ->
+        val name = "whispertype.host.$key"
+        project.findProperty(name)?.let { systemProperty(name, it.toString()) }
+    }
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.appcompat:appcompat:1.7.1")

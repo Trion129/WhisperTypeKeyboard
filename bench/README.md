@@ -27,6 +27,26 @@ faster-whisper (full OpenAI decoder: beam search + temperature fallback) is
 the **quality reference**, not an app dependency. It pulls
 `Systran/faster-whisper-<size>` on first use.
 
+## Quick host check (real Kotlin pipeline, no emulator)
+
+Runs the app's actual `WavReader` + `SherpaWhisperEngine` + language
+resolution (`ModelCatalog.effectiveLanguage`) as a JUnit test on the host JVM,
+using sherpa-onnx's linux-x64 JNI build of the same version pinned in
+`app/build.gradle.kts`. No venv needed; scoring is stdlib `bench/score.py`.
+
+```bash
+bench/host_replay.sh tiny                              # English, bench/fixtures
+bench/host_replay.sh small hi bench/fixtures
+bench/host_replay.sh base fr bench/fixtures/french
+```
+
+The JNI libs and models are cached in `~/.cache/whispertype-host`
+(override with `WHISPERTYPE_HOST_CACHE`); the libs are symlinked into
+`app/src/test/jniLibs/` (gitignored). Rows land in
+`bench/results/host-*.jsonl` with PipelineReplayTest's schema plus
+`resolved_language`. Limits: x86_64 desktop timings are not phone timings,
+and the AudioRecord capture path is not exercised.
+
 ## Fixtures
 
 ```bash
@@ -52,7 +72,7 @@ Arms, all on the same audio and same model files:
 
 | arm | preprocessing | decoder | isolates |
 |---|---|---|---|
-| `app` | `WavReader` mirror (resample + peak norm) | sherpa 1.13.4 greedy + 30 s pad retry | the installed app |
+| `app` | `WavReader` mirror (resample + peak norm) | sherpa 1.13.4 greedy + ~29.5 s pad retry | the installed app |
 | `raw` | resample only, **no peak norm** | same | what normalization does |
 | `app-nopad` | `app` without the pad retry | same | what the retry does |
 | `faster` | `app` samples | faster-whisper, beam 5 | the decoder-quality gap |
@@ -63,7 +83,7 @@ The `app` mirror reproduces, exactly:
 `WavReader.resample` linear interpolation and
 truncating output length, `WavReader.preprocess` peak division,
 `SherpaWhisperEngine`'s greedy_search / 2 threads / cpu / transcribe config
-and its `tokens >= floor(s*6)` pad-to-30 s retry. One documented divergence:
+and its frame-based token-cap check with a pad-to-~29.5 s retry. One documented divergence:
 the Python parser skips WAV pad bytes after odd-sized chunks and the Kotlin
 parser does not — irrelevant for app-written recordings, relevant if you
 feed third-party wavs to both.
