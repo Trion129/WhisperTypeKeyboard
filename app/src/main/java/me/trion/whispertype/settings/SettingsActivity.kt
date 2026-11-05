@@ -12,12 +12,16 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.trion.whispertype.R
 import me.trion.whispertype.util.Prefs
 import me.trion.whispertype.voice.LocalAsrEngine
 import me.trion.whispertype.voice.ModelCatalog
+import me.trion.whispertype.voice.LanguagePolicy
 import me.trion.whispertype.voice.ModelDownloader
+import me.trion.whispertype.voice.ModelSpec
 
 class SettingsActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
@@ -29,6 +33,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var btnUse: Button
     private lateinit var btnImport: Button
     private lateinit var btnDelete: Button
+    private lateinit var modelDescription: TextView
+    private var updatingLanguagePicker = false
+    private var modelChoices: List<ModelSpec> = emptyList()
+    private var languageChoices: List<Pair<String, String>> = emptyList()
     private lateinit var progress: ProgressBar
     private var busy = false
 
@@ -47,6 +55,7 @@ class SettingsActivity : AppCompatActivity() {
         downloader = ModelDownloader(this)
 
         modelStatus = findViewById(R.id.model_status)
+        modelDescription = findViewById(R.id.model_description)
         modelPicker = findViewById(R.id.model_picker)
         languagePicker = findViewById(R.id.language_picker)
         btnDownload = findViewById(R.id.btn_download)
@@ -55,20 +64,6 @@ class SettingsActivity : AppCompatActivity() {
         btnDelete = findViewById(R.id.btn_delete)
         progress = findViewById(R.id.model_progress)
 
-        modelPicker.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            ModelCatalog.entries.map { "${it.title} (${it.approxSizeMb} MB)" }
-        ).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
-        languagePicker.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            ModelCatalog.languageOptions.map { it.title }
-        ).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
         languagePicker.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
                 parent: AdapterView<*>?,
@@ -76,11 +71,11 @@ class SettingsActivity : AppCompatActivity() {
                 position: Int,
                 id: Long
             ) {
-                if (!languageApplies()) return
-                val language = ModelCatalog.languageOptions.getOrNull(position)?.code ?: return
-                if (prefs.transcriptionLanguage == language) return
-                prefs.transcriptionLanguage = language
-                LocalAsrEngine.releaseAll()
+                if (updatingLanguagePicker || position != languagePicker.selectedItemPosition) return
+                val language = languageChoices.getOrNull(position)?.first ?: return
+                val policy = selectedModel().languagePolicy as? LanguagePolicy.Selectable ?: return
+                if (prefs.languageFor(selectedModel().id, policy) == language) return
+                prefs.setLanguageFor(selectedModel().id, language)
                 refreshUi()
             }
 
@@ -134,12 +129,7 @@ class SettingsActivity : AppCompatActivity() {
         downloader.purgeLegacyInstall()
         prefs.migrate()
 
-        // Restore the active catalog model when possible; otherwise use base.en.
-        val activeIdx =
-            ModelCatalog.entries.indexOfFirst { it.id == prefs.activeModelId }
-        val defaultIdx =
-            ModelCatalog.entries.indexOfFirst { it.id == ModelCatalog.DEFAULT_ID }.coerceAtLeast(0)
-        modelPicker.setSelection(if (activeIdx >= 0) activeIdx else defaultIdx)
+        refreshModelPicker(prefs.activeModelId)
 
         refreshUi()
     }
@@ -155,34 +145,73 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun selectedModel() =
-        ModelCatalog.entries.getOrElse(modelPicker.selectedItemPosition) {
-            ModelCatalog.entries.first()
-        }
+        modelChoices.getOrNull(modelPicker.selectedItemPosition)
+            ?: ModelCatalog.byId(ModelCatalog.DEFAULT_ID)!!
 
     private fun selectedId(): String = selectedModel().id
 
-    /**
-     * Whether the language choice can affect a model that transcribes: a
-     * multilingual catalog entry is selected, or the active model is a
-     * multilingual one (catalog entries and detected imports alike).
-     */
-    private fun languageApplies(): Boolean =
-        selectedModel().isMultilingual || downloader.isInstalledMultilingual(prefs.activeModelId)
+    private fun refreshModelPicker(preferredId: String? = null) {
+        val selectedId = preferredId ?: modelChoices.getOrNull(modelPicker.selectedItemPosition)?.id
+        val choices = ModelCatalog.entries + listOfNotNull(downloader.modelSpec(ModelCatalog.IMPORT_ID))
+        if (choices != modelChoices) {
+            modelChoices = choices
+            modelPicker.adapter = ArrayAdapter(
+                this,
+                android.R.layout.simple_spinner_item,
+                choices.map { model ->
+                    val title = if (model.id == ModelCatalog.IMPORT_ID) {
+                        getString(R.string.imported_model_title, model.title)
+                    } else model.title
+                    if (model.approxSizeMb > 0) "$title (${model.approxSizeMb} MB)" else title
+                },
+            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        }
+        val index = choices.indexOfFirst { it.id == selectedId }.takeIf { it >= 0 }
+            ?: choices.indexOfFirst { it.id == ModelCatalog.DEFAULT_ID }
+        if (modelPicker.selectedItemPosition != index) modelPicker.setSelection(index, false)
+    }
 
     private fun refreshLanguagePicker() {
-        val applies = languageApplies()
-        val language = if (applies) {
-            prefs.transcriptionLanguage
-        } else {
-            ModelCatalog.ENGLISH_LANGUAGE
+        val policy = selectedModel().languagePolicy
+        val selectable = policy as? LanguagePolicy.Selectable
+        languageChoices = when (policy) {
+            is LanguagePolicy.Selectable ->
+                policy.codes
+                    .distinct()
+                    .map { code ->
+                        code to when {
+                            code.isEmpty() -> getString(R.string.language_auto_detect)
+                            else -> ModelCatalog.languageOptions.firstOrNull { it.code == code }?.title ?: code
+                        }
+                    }
+            is LanguagePolicy.Fixed -> listOf(policy.code to policy.label)
+            is LanguagePolicy.Automatic -> listOf("" to policy.label)
         }
-        val index = ModelCatalog.languageOptions.indexOfFirst { it.code == language }
-            .coerceAtLeast(0)
-        languagePicker.isEnabled = applies
-        languagePicker.setSelection(index)
+        if (languageChoices.isEmpty()) {
+            languageChoices = listOf("" to getString(R.string.language_auto_detect))
+        }
+        val language = selectable?.let { prefs.languageFor(selectedModel().id, it) }
+            ?: languageChoices.first().first
+        val index = languageChoices.indexOfFirst { it.first == language }.coerceAtLeast(0)
+        updatingLanguagePicker = true
+        try {
+            languagePicker.adapter = ArrayAdapter(
+                this,
+                android.R.layout.simple_spinner_item,
+                languageChoices.map { it.second },
+            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            languagePicker.isEnabled = selectable != null && !busy
+            languagePicker.visibility = if (selectable != null) android.view.View.VISIBLE else android.view.View.GONE
+            findViewById<android.view.View>(R.id.language_label).visibility = languagePicker.visibility
+            findViewById<android.view.View>(R.id.language_help).visibility = languagePicker.visibility
+            languagePicker.setSelection(index, false)
+        } finally {
+            updatingLanguagePicker = false
+        }
     }
 
     private fun refreshUi() {
+        refreshModelPicker()
         val selected = selectedModel()
         val active = prefs.activeModelId
         refreshLanguagePicker()
@@ -195,21 +224,33 @@ class SettingsActivity : AppCompatActivity() {
                 getString(R.string.model_status_installed)
             else -> getString(R.string.model_status_not_installed)
         }
+        val imported = downloader.modelSpec(ModelCatalog.IMPORT_ID)
         val importState = when {
             active == ModelCatalog.IMPORT_ID && importInstalled ->
                 getString(R.string.model_status_active)
-            importInstalled -> getString(R.string.model_status_installed)
+            importInstalled -> getString(R.string.model_status_import_installed)
             else -> getString(R.string.model_status_not_installed)
         }
-        modelStatus.text =
-            "${selected.title}: $state\n${getString(R.string.model_status_import_slot)}: $importState"
+        modelDescription.text = buildString {
+            if (selected.description.isNotBlank()) append(selected.description)
+            if (selected.id != ModelCatalog.IMPORT_ID && active == ModelCatalog.IMPORT_ID && imported != null) {
+                if (isNotEmpty()) append('\n')
+                append(getString(R.string.active_import_description, imported.title))
+                if (imported.description.isNotBlank()) append(": ").append(imported.description)
+            }
+        }
+        modelStatus.text = if (selected.id == ModelCatalog.IMPORT_ID) {
+            "${getString(R.string.imported_model_title, selected.title)}: $state"
+        } else {
+            "${selected.title}: $state\n${getString(R.string.model_status_import_slot)}: ${imported?.title ?: ""} $importState"
+        }
 
         btnDownload.isEnabled = !busy && !downloader.isInstalled(selected.id)
         btnUse.isEnabled = !busy && downloader.isInstalled(selected.id) && active != selected.id
         btnImport.isEnabled = !busy
-        btnDelete.isEnabled =
-            !busy && (downloader.isInstalled(selected.id) || importInstalled)
+        btnDelete.isEnabled = !busy && downloader.isInstalled(selected.id)
     }
+
 
     private fun startDownload() {
         val id = selectedId()
@@ -228,12 +269,13 @@ class SettingsActivity : AppCompatActivity() {
                     }
                 }
             }.let { result ->
-                busy = false
                 progress.visibility = ProgressBar.GONE
                 when (result) {
                     is ModelDownloader.Result.Success -> {
                         prefs.activeModelId = id
-                        LocalAsrEngine.releaseAll()
+                        withContext(Dispatchers.IO) {
+                            LocalAsrEngine.releaseAll()
+                        }
                         Toast.makeText(
                             this@SettingsActivity,
                             R.string.toast_model_ready,
@@ -248,6 +290,7 @@ class SettingsActivity : AppCompatActivity() {
                         ).show()
                     }
                 }
+                busy = false
                 refreshUi()
             }
         }
@@ -256,21 +299,32 @@ class SettingsActivity : AppCompatActivity() {
     private fun useSelected() {
         val id = selectedId()
         prefs.activeModelId = id
-        LocalAsrEngine.releaseAll()
+        busy = true
         refreshUi()
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                LocalAsrEngine.releaseAll()
+            }
+            busy = false
+            refreshUi()
+        }
     }
 
     private fun deleteSelected() {
         val selected = selectedId()
-        val target = when {
-            downloader.isInstalled(selected) -> selected
-            downloader.isInstalled(ModelCatalog.IMPORT_ID) -> ModelCatalog.IMPORT_ID
-            else -> return
-        }
+        if (!downloader.isInstalled(selected)) return
+        val target = selected
         if (prefs.activeModelId == target) prefs.clearActiveModelId()
-        LocalAsrEngine.releaseAll()
-        downloader.delete(target)
+        busy = true
         refreshUi()
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                LocalAsrEngine.releaseAll()
+                downloader.delete(target)
+            }
+            busy = false
+            refreshUi()
+        }
     }
 
     private fun startImport(uri: Uri) {
@@ -290,12 +344,14 @@ class SettingsActivity : AppCompatActivity() {
                     }
                 }
             }.let { result ->
-                busy = false
                 progress.visibility = ProgressBar.GONE
                 when (result) {
                     is ModelDownloader.Result.Success -> {
                         prefs.activeModelId = result.modelId
-                        LocalAsrEngine.releaseAll()
+                        withContext(Dispatchers.IO) {
+                            LocalAsrEngine.releaseAll()
+                        }
+                        refreshModelPicker(result.modelId)
                         Toast.makeText(
                             this@SettingsActivity,
                             R.string.toast_model_ready,
@@ -310,6 +366,7 @@ class SettingsActivity : AppCompatActivity() {
                         ).show()
                     }
                 }
+                busy = false
                 refreshUi()
             }
         }

@@ -67,8 +67,11 @@ object AsrDiagnostics {
             TAG,
             "decode samples=${trace.sampleCount} firstPassTokens=${trace.firstPassTokens} " +
                 "tokenCap=${trace.tokenCap} hitTokenCap=${trace.hitTokenCap} " +
+                "usedRetry=${trace.usedRetry} paddedUpFront=${trace.paddedUpFront} " +
+                "detectedLanguage=${trace.detectedLanguage.ifBlank { "?" }} " +
                 "firstDecodeMs=${trace.firstDecodeMs} " +
-                "retryDecodeMs=${trace.retryDecodeMs}"
+                "retryDecodeMs=${trace.retryDecodeMs} " +
+                "emptyTokens=${trace.emptyTokenCount} splitDecodes=${trace.splitDecodes}"
         )
     }
 

@@ -1,31 +1,15 @@
 package me.trion.whispertype.ime
 
-enum class RecordingPhase { LISTENING, WARN, LIMIT }
+data class RecordingTick(val elapsedMs: Long)
 
-data class RecordingTick(
-    val elapsedMs: Long,
-    val remainingMs: Long,
-    val phase: RecordingPhase,
-)
+/** Converts cumulative PCM16 byte count to elapsed time without a total-duration clamp. */
+class RecordingLimiter {
+    fun onBytes(pcmBytes: Int, sampleRate: Int = 16_000): RecordingTick =
+        onBytes(pcmBytes.toLong(), sampleRate)
 
-class RecordingLimiter(
-    val maxMs: Long = 30_000,
-    val warnMs: Long = 25_000,
-) {
-    fun onBytes(pcmBytes: Int, sampleRate: Int = 16_000): RecordingTick {
-        val bytesPerMs = sampleRate.toLong() * 2L
-        val elapsed = if (bytesPerMs <= 0L) {
-            0L
-        } else {
-            (pcmBytes.toLong() * 1000L) / bytesPerMs
-        }
-        val clamped = elapsed.coerceAtMost(maxMs)
-        val remaining = (maxMs - clamped).coerceAtLeast(0L)
-        val phase = when {
-            elapsed >= maxMs -> RecordingPhase.LIMIT
-            elapsed >= warnMs -> RecordingPhase.WARN
-            else -> RecordingPhase.LISTENING
-        }
-        return RecordingTick(elapsedMs = clamped, remainingMs = remaining, phase = phase)
+    fun onBytes(pcmBytes: Long, sampleRate: Int = 16_000): RecordingTick {
+        val bytesPerSecond = sampleRate.toLong() * 2L
+        val elapsed = if (bytesPerSecond <= 0L) 0L else pcmBytes.coerceAtLeast(0L) * 1000L / bytesPerSecond
+        return RecordingTick(elapsed)
     }
 }

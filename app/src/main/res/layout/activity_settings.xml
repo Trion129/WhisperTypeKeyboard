@@ -30,6 +30,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
+            android:id="@+id/language_label"
             android:text="@string/model_language_label"
             android:textColor="@color/on_surface"
             android:textSize="14sp" />
@@ -39,8 +40,16 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp" />
+        <TextView
+            android:id="@+id/model_description"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:textColor="@color/key_text_secondary"
+            android:textSize="13sp" />
 
         <TextView
+            android:id="@+id/language_help"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"

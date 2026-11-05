@@ -26,12 +26,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.ensureActive
 import me.trion.whispertype.R
 import me.trion.whispertype.settings.SettingsActivity
 import me.trion.whispertype.util.Prefs
 import me.trion.whispertype.voice.AudioRecorder
 import me.trion.whispertype.voice.LocalAsrEngine
+import me.trion.whispertype.voice.SegmentFile
+import me.trion.whispertype.voice.TranscriptPart
+import me.trion.whispertype.voice.VadAssets
+import me.trion.whispertype.voice.joinTranscriptSegments
 import java.io.File
+import java.util.Collections
 
 class KeyboardController(
     private val context: Context,
@@ -74,7 +82,7 @@ class KeyboardController(
     private var deleteJob: Runnable? = null
     private var transcribeJob: Job? = null
     private var activePopup: PopupWindow? = null
-    private var warnedHaptic = false
+    private var activeRecording: RecordingSession? = null
     private var lastSpaceAt = 0L
     private var selecting = false
     private var cursorVisible = false
@@ -124,11 +132,7 @@ class KeyboardController(
     }
 
     fun onFinishInput() {
-        if (isListening) {
-            isListening = false
-            micButton?.isSelected = false
-            recorder.cancel()
-        }
+        if (isListening) cancelCurrentRecording()
         activePopup?.dismiss()
         activePopup = null
         emojiSearchSession.clear()
@@ -140,11 +144,12 @@ class KeyboardController(
 
     fun destroy() {
         deleteJob?.let { mainHandler.removeCallbacks(it) }
-        transcribeJob?.cancel()
+        cancelCurrentRecording()
         activePopup?.dismiss()
         activePopup = null
         recorder.onBytes = null
-        recorder.cancel()
+        recorder.onSegmentFile = null
+        recorder.onError = null
         asr.release()
     }
 
@@ -728,7 +733,6 @@ class KeyboardController(
     }
 
     private fun onMicTapped() {
-        if (isTranscribing) return
         if (isListening) {
             stopAndTranscribe()
         } else {
@@ -737,6 +741,8 @@ class KeyboardController(
     }
 
     private fun startListening() {
+        if (isTranscribing) return
+        cancelCurrentRecording()
         if (!requestMicPermission()) {
             setStatus(context.getString(R.string.error_mic_permission), warning = false, showStatus = true)
             return
@@ -745,71 +751,99 @@ class KeyboardController(
             setStatus(context.getString(R.string.error_no_model), warning = false, showStatus = true)
             return
         }
-        if (!recorder.start()) {
+        val session = RecordingSession(scope, asr)
+        activeRecording = session
+        recorder.onSegmentFile = session::offer
+        recorder.onError = { message ->
+            session.recordError(message)
+            mainHandler.post {
+                if (activeRecording === session && !session.cancelled) {
+                    setStatus(message, warning = false, showStatus = true)
+                    if (isListening) stopAndTranscribe()
+                }
+            }
+        }
+        asr.onRecordingStart()
+        val maxSegmentMs = asr.currentMaxSegmentMs()
+        val vadModel = VadAssets.ensureInstalled(context)
+        if (!recorder.start(maxSegmentMs, context.cacheDir, vadModel)) {
+            session.cancel()
+            activeRecording = null
             setStatus(context.getString(R.string.error_mic_permission), warning = false, showStatus = true)
             return
         }
         isListening = true
-        warnedHaptic = false
         micButton?.isSelected = true
         setStatus(context.getString(R.string.status_listening), warning = false, showStatus = true)
         performHaptic()
     }
 
-    private fun onRecordingBytes(bytes: Int) {
+    private fun onRecordingBytes(bytes: Long) {
         if (!isListening) return
-        val tick = limiter.onBytes(bytes)
-        val elapsedS = (tick.elapsedMs / 1000L).toInt()
-        val remainS = (tick.remainingMs / 1000L).toInt()
-        val warning = tick.phase != RecordingPhase.LISTENING
-        if (tick.phase == RecordingPhase.WARN && !warnedHaptic) {
-            warnedHaptic = true
-            performHaptic()
-        }
+        val elapsedS = (limiter.onBytes(bytes).elapsedMs / 1000L).toInt()
         setStatus(
-            context.getString(R.string.status_listening_timer, elapsedS, remainS),
-            warning = warning,
-            showStatus = true
+            context.getString(R.string.status_listening_elapsed, elapsedS),
+            warning = false,
+            showStatus = true,
         )
-        if (tick.phase == RecordingPhase.LIMIT) {
-            stopAndTranscribe()
-        }
     }
 
     private fun stopAndTranscribe() {
-        if (!isListening && !isTranscribing) return
+        if (!isListening) return
         isListening = false
         micButton?.isSelected = false
         isTranscribing = true
         setStatus(context.getString(R.string.status_transcribing), warning = false, showStatus = true)
 
-        val cacheFile = File(context.cacheDir, "whisper_input_${System.currentTimeMillis()}.wav")
-        val wav = recorder.stopToWav(cacheFile)
-        if (wav == null) {
+        val session = activeRecording ?: run {
             isTranscribing = false
             setStatus(context.getString(R.string.error_no_audio), warning = false, showStatus = true)
             return
         }
-
+        recorder.stop()
+        recorder.onSegmentFile = null
+        session.close()
         transcribeJob = scope.launch {
-            val result = withContext(Dispatchers.Default) {
-                asr.transcribeWav(wav)
-            }
+            session.worker.join()
+            val text = session.transcript()
+            val failure = session.failure
             withContext(Dispatchers.Main) {
+                if (activeRecording !== session || session.cancelled) return@withContext
+                activeRecording = null
+                transcribeJob = null
                 isTranscribing = false
-                when (result) {
-                    is LocalAsrEngine.Result.Success -> {
-                        commitDictation(result.text)
-                        refreshReadyStatus()
+                when {
+                    text.isNotEmpty() -> {
+                        commitDictation(text)
+                        if (failure != null) {
+                            setStatus(
+                                context.getString(R.string.status_partial_transcription, failure),
+                                warning = false,
+                                showStatus = true,
+                            )
+                        } else {
+                            refreshReadyStatus()
+                        }
                         refreshSuggestions()
                     }
-                    is LocalAsrEngine.Result.Error -> {
-                        setStatus(result.message, warning = false, showStatus = true)
-                    }
+                    failure != null -> setStatus(failure, warning = false, showStatus = true)
+                    else -> setStatus(context.getString(R.string.error_no_audio), warning = false, showStatus = true)
                 }
             }
-            wav.delete()
         }
+    }
+
+    private fun cancelCurrentRecording() {
+        isListening = false
+        isTranscribing = false
+        micButton?.isSelected = false
+        recorder.cancel()
+        recorder.onSegmentFile = null
+        recorder.onError = null
+        activeRecording?.cancel()
+        activeRecording = null
+        transcribeJob?.cancel()
+        transcribeJob = null
     }
 
     private fun commitDictation(text: String) {
@@ -1179,4 +1213,83 @@ class KeyboardController(
         const val BROWSE_PANEL_HEIGHT_DP = 162
     }
 
+}
+
+private class RecordingSession(
+    scope: CoroutineScope,
+    private val asr: LocalAsrEngine,
+) {
+    private val queue = Channel<SegmentFile>(Channel.UNLIMITED)
+    private val queuedFiles = Collections.synchronizedSet(mutableSetOf<File>())
+    private val texts = mutableListOf<TranscriptPart>()
+    @Volatile var cancelled = false
+        private set
+    @Volatile var failure: String? = null
+        private set
+
+    val worker: Job = scope.launch(Dispatchers.IO) {
+        try {
+            for (segment in queue) {
+                val file = segment.file
+                try {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val result = asr.transcribeWav(file)
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    when (result) {
+                        is LocalAsrEngine.Result.Success -> if (result.text.isNotBlank()) {
+                            texts += TranscriptPart(result.text, segment.startsAfterPause)
+                        }
+                        is LocalAsrEngine.Result.Error -> if (result.message != "No speech detected" && failure == null) {
+                            failure = result.message
+                        }
+                    }
+                } finally {
+                    deleteTracked(file)
+                }
+            }
+        } catch (_: CancellationException) {
+            // Cancellation invalidates the entire recording session; no result may be committed.
+        } finally {
+            queue.cancel()
+            deleteAllTracked()
+        }
+    }
+
+    fun offer(segment: SegmentFile) {
+        if (cancelled) {
+            segment.file.delete()
+            return
+        }
+        queuedFiles.add(segment.file)
+        if (queue.trySend(segment).isFailure) deleteTracked(segment.file)
+    }
+
+    fun close() {
+        queue.close()
+    }
+
+    fun cancel() {
+        cancelled = true
+        queue.cancel()
+        deleteAllTracked()
+        worker.cancel()
+    }
+
+    fun recordError(message: String) {
+        if (failure == null) failure = message
+    }
+
+    fun transcript(): String = joinTranscriptSegments(texts)
+
+    private fun deleteTracked(file: File) {
+        queuedFiles.remove(file)
+        file.delete()
+    }
+
+    private fun deleteAllTracked() {
+        synchronized(queuedFiles) {
+            queuedFiles.forEach { it.delete() }
+            queuedFiles.clear()
+        }
+    }
 }

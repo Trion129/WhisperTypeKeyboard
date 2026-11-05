@@ -11,7 +11,30 @@ sherpa-onnx bundles a copy of ONNX Runtime for its native inference:
   Copyright (c) Microsoft Corporation
   Licensed under the MIT License
 
-The Whisper models (tiny.en / base.en / small.en, int8) are downloaded on
-demand from the official Hugging Face packs:
+The Whisper models (tiny/base/small, English and multilingual int8) are
+downloaded on demand from the official Hugging Face packs:
   https://huggingface.co/csukuangfj/sherpa-onnx-whisper-{id}
   OpenAI Whisper weights are licensed under the MIT License
+
+Oriserve Hindi2Hinglish Swift weights are licensed under Apache-2.0:
+  https://huggingface.co/Oriserve/Whisper-Hindi2Hinglish-Swift
+  ONNX export distributed by ParisMita Global Solutions:
+  https://huggingface.co/parismitaglobalsolutions/indicconformer-sherpa-onnx
+  WhisperType uses the pinned INT8 hi-hinglish-swift encoder/decoder export.
+
+NVIDIA Parakeet TDT CTC 110M English weights are licensed under CC-BY-4.0:
+  https://huggingface.co/nvidia/parakeet-tdt_ctc-110m
+  https://creativecommons.org/licenses/by/4.0/
+  sherpa-onnx NeMo CTC export by csukuangfj:
+  https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
+  INT8 distribution mirror by VocaHQ:
+  https://huggingface.co/VocaHQ/sherpa-onnx-nemo-parakeet-tdt-ctc-110m-en-int8
+  WhisperType uses the pinned CTC graph, not the TDT decoder.
+
+Silero VAD v4 is bundled as app/src/main/assets/vad/silero_vad.onnx and is
+loaded by sherpa-onnx at run time to find speech pauses:
+  https://github.com/snakers4/silero-vad
+  Copyright (c) Silero Team
+  Licensed under the MIT License
+  Model file from the sherpa-onnx asr-models release, SHA-256
+  9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6

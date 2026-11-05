@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.preference.PreferenceManager
 import me.trion.whispertype.voice.ModelCatalog
+import me.trion.whispertype.voice.LanguagePolicy
 
 class Prefs(context: Context) {
     private val prefs: SharedPreferences =
@@ -34,13 +35,22 @@ class Prefs(context: Context) {
         set(value) = prefs.edit().putString(KEY_ACTIVE_MODEL_ID, value).apply()
 
     var transcriptionLanguage: String
-        get() = ModelCatalog.normalizeLanguage(
-            prefs.getString(KEY_TRANSCRIPTION_LANGUAGE, ModelCatalog.AUTO_LANGUAGE)
-                ?: ModelCatalog.AUTO_LANGUAGE
-        )
+        get() = (prefs.getString(KEY_TRANSCRIPTION_LANGUAGE, ModelCatalog.AUTO_LANGUAGE)
+            ?: ModelCatalog.AUTO_LANGUAGE).trim()
         set(value) = prefs.edit()
-            .putString(KEY_TRANSCRIPTION_LANGUAGE, ModelCatalog.normalizeLanguage(value))
+            .putString(KEY_TRANSCRIPTION_LANGUAGE, value.trim())
             .apply()
+
+    fun languageFor(modelId: String, policy: LanguagePolicy): String {
+        val key = "language:$modelId"
+        val saved = prefs.getString(key, null)?.trim()
+        val legacy = prefs.getString(KEY_TRANSCRIPTION_LANGUAGE, null)?.trim()
+        return resolveLanguage(policy, saved, legacy)
+    }
+
+    fun setLanguageFor(modelId: String, code: String) {
+        prefs.edit().putString("language:$modelId", code.trim()).apply()
+    }
 
     fun emojiRecents(): List<String> {
         val raw = prefs.getString(KEY_EMOJI_RECENTS, "") ?: ""
@@ -80,4 +90,11 @@ class Prefs(context: Context) {
         // Legacy key from the RTranslator pipeline; only referenced by migrate().
         private const val KEY_MODEL_SOURCE = "model_source"
     }
+}
+
+internal fun resolveLanguage(policy: LanguagePolicy, saved: String?, legacy: String?): String {
+    if (policy !is LanguagePolicy.Selectable) return policy.effectiveLanguage("")
+    if (saved != null && saved in policy.codes) return saved
+    if (legacy != null && legacy in policy.codes) return legacy
+    return policy.defaultCode
 }

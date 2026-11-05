@@ -42,9 +42,9 @@ def main() -> int:
         if line.strip()
     ]
 
-    print(f"{'file':<28} {'dur s':>6} {'ms':>7} {'tok/cap':>9} {'cap':>7} "
-          f"{'CER':>6} {'WER':>6}  text")
-    cers, wers, times, cap_hits = [], [], [], 0
+    print(f"{'file':<28} {'dur s':>6} {'ms':>7} {'tok/cap':>9} {'lang':>5} "
+          f"{'flags':>9} {'CER':>6} {'WER':>6}  text")
+    cers, wers, times, cap_hits, loss_rows = [], [], [], 0, 0
     for r in rows:
         text = r.get("text") or ""
         ref = refs.get(r.get("file", ""))
@@ -56,17 +56,35 @@ def main() -> int:
         cap_hits += hit
         if r.get("transcribe_ms") is not None:
             times.append(r["transcribe_ms"])
-        tok = f"{r.get('first_pass_tokens', '?')}/{r.get('token_cap', '?')}"
+        tok = (f"{r['first_pass_tokens']}/{r['token_cap']}"
+               if "first_pass_tokens" in r and "token_cap" in r else "-")
+        lang = (r.get("detected_language") or "-")[:5]
+        loss = int(r.get("empty_tokens") or 0)
+        loss_rows += 1 if loss else 0
+        flag = " ".join(f for f in (
+            "CAP-HIT" if hit else "",
+            "RETRY" if r.get("used_retry") else "",
+            "PAD-UP" if r.get("padded_up_front") else "",
+            "SPLIT" if r.get("split_decodes") else "",
+            "BYTE-LOSS" if loss else "",
+        ) if f)
         snippet = text if len(text) <= 60 else text[:57] + "..."
         dur = r.get("duration_s")
         print(f"{r.get('file', '?')[:28]:<28} "
               f"{(f'{dur:.1f}' if dur is not None else '-'):>6} "
-              f"{r.get('transcribe_ms', '-'):>7} {tok:>9} "
-              f"{('CAP-HIT' if hit else ''):>7} "
+              f"{r.get('transcribe_ms', '-'):>7} {tok:>9} {lang:>5} "
+              f"{flag:>9} "
               f"{fmt(rates['cer']):>6} {fmt(rates['wer']):>6}  {snippet}")
 
     print()
-    print(f"files: {len(rows)}  scored: {len(cers)}  cap hits: {cap_hits}")
+    cap_rows = sum("hit_token_cap" in r for r in rows)
+    print(f"files: {len(rows)}  scored: {len(cers)}  cap hits: {cap_hits} ({cap_rows} Whisper traces)")
+    padded_rows = sum(1 for r in rows if r.get("padded_up_front"))
+    retried_rows = sum(1 for r in rows if r.get("used_retry"))
+    if padded_rows or retried_rows:
+        print(f"padded up front: {padded_rows}  retried: {retried_rows}")
+    if loss_rows:
+        print(f"BYTE-LOSS rows: {loss_rows} (runtime dropped byte tokens; upgrade sherpa-onnx)")
     if cers:
         print(f"mean CER: {sum(cers) / len(cers):.3f}  mean WER: {sum(wers) / len(wers):.3f}")
     if times:

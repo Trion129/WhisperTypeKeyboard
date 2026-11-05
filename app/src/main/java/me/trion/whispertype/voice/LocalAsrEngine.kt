@@ -10,9 +10,10 @@ import java.util.WeakHashMap
 class LocalAsrEngine(private val context: Context) {
     private val downloader = ModelDownloader(context)
     private val prefs = Prefs(context)
-    private var engine: SherpaWhisperEngine? = null
+    private var engine: AsrEngine? = null
     private var loadedModelId: String? = null
     private var loadedLanguage: String? = null
+    private var loadedGeneration: String? = null
     private var legacyMaintenanceDone = false
 
     /**
@@ -30,25 +31,18 @@ class LocalAsrEngine(private val context: Context) {
         runLegacyMaintenance()
         val id = prefs.activeModelId
         if (id.isBlank()) return "Install a model in settings"
-        val language = ModelCatalog.effectiveLanguage(
-            id,
-            prefs.transcriptionLanguage,
-            downloader.isInstalledMultilingual(id),
-        )
-        val paths = downloader.resolvePaths(id)
-        if (paths == null) return "Model files are missing, reinstall in settings"
-        if (engine != null && loadedModelId == id && loadedLanguage == language) return null
+        val model = downloader.resolveModel(id)
+            ?: return "Model files are missing, reinstall in settings"
+        val language = prefs.languageFor(id, model.spec.languagePolicy)
+        if (engine != null && loadedModelId == id && loadedLanguage == language &&
+            loadedGeneration == model.generation
+        ) return null
         if (engine != null) release()
         return try {
-            val (encoder, decoder, tokens) = paths
-            engine = SherpaWhisperEngine(
-                encoderPath = encoder.absolutePath,
-                decoderPath = decoder.absolutePath,
-                tokensPath = tokens.absolutePath,
-                language = language,
-            )
+            engine = AsrEngineFactory.create(model, language)
             loadedModelId = id
             loadedLanguage = language
+            loadedGeneration = model.generation
             synchronized(loadedEngines) { loadedEngines.add(this) }
             null
         } catch (e: Exception) {
@@ -65,7 +59,16 @@ class LocalAsrEngine(private val context: Context) {
 
     fun currentModelTitle(): String {
         val id = prefs.activeModelId
-        return ModelCatalog.byId(id)?.title ?: "Imported model"
+        return downloader.modelSpec(id)?.title ?: "Imported model"
+    }
+
+    /** Segment capability snapshot taken when a recording starts. */
+    fun currentMaxSegmentMs(): Long =
+        downloader.modelSpec(prefs.activeModelId)?.maxSegmentMs ?: 28_000L
+
+    /** Tells the loaded engine a new recording started (per-recording state). */
+    fun onRecordingStart() = synchronized(engineLock) {
+        (engine as? SherpaWhisperEngine)?.onRecordingStart()
     }
 
     fun transcribeWav(wavFile: File): Result = synchronized(engineLock) {
@@ -74,7 +77,7 @@ class LocalAsrEngine(private val context: Context) {
         // TEMPORARY local-only diagnostics (remove with AsrDiagnostics before
         // release): metrics + audio copy, never transcription text.
         val diagnosticsOn = AsrDiagnostics.enabled(context)
-        val activeEngine = engine
+        val activeEngine = engine as? SherpaWhisperEngine
         activeEngine?.onTrace =
             if (diagnosticsOn) ({ AsrDiagnostics.onEngineTrace(it) }) else null
         if (diagnosticsOn) {
@@ -95,6 +98,7 @@ class LocalAsrEngine(private val context: Context) {
         engine = null
         loadedModelId = null
         loadedLanguage = null
+        loadedGeneration = null
         synchronized(loadedEngines) { loadedEngines.remove(this) }
     }
 
@@ -108,6 +112,12 @@ class LocalAsrEngine(private val context: Context) {
             WeakHashMap<LocalAsrEngine, Boolean>()
         )
         private val engineLock = Any()
+
+        /** Serializes file replacement with decoding and releases native file users first. */
+        fun <T> withModelMutation(block: () -> T): T = synchronized(engineLock) {
+            releaseAll()
+            block()
+        }
 
         fun releaseAll() = synchronized(engineLock) {
             loadedEngines.toList().forEach { it.release() }

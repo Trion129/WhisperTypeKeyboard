@@ -10,233 +10,98 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
-/**
- * Shared import pipeline: extract the zip into a staging dir, find the three
- * sherpa Whisper files, canonicalize their names, verify, then swap them into
- * the target model dir via safeInstall. Never touches any model dir other than
- * the target, so a failed import leaves every other installed size intact.
- * The caller is responsible for setting the active model id on success.
- */
-internal fun installImportZip(
-    zipFile: File,
-    modelsDir: File,
-): ModelDownloader.Result {
-    val staging = File(modelsDir, "import.staging")
-    try {
-        staging.deleteRecursively()
-        staging.mkdirs()
-        try {
-            ModelDownloader.extractZipFlat(zipFile, staging)
-        } catch (e: Exception) {
-            return ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_READ)
-        }
-
-        val found = ModelDownloader.findModelFiles(staging)
-        if (found == null) {
-            return ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_INVALID)
-        }
-        val (encoder, decoder, tokens) = found
-
-        // If the package uses a catalog prefix (<id>-), it installs into that
-        // model id's folder; anything else goes to the generic import slot.
-        val targetId = ModelDownloader.detectCatalogId(encoder.name) ?: ModelCatalog.IMPORT_ID
-        val names = ModelDownloader.requiredFileNames(targetId)
-        val canonEncoder = File(staging, names[0])
-        val canonDecoder = File(staging, names[1])
-        val canonTokens = File(staging, names[2])
-
-        fun canonicalize(src: File, dest: File) {
-            if (src == dest) return
-            dest.delete()
-            src.copyTo(dest)
-            src.delete()
-        }
-        canonicalize(encoder, canonEncoder)
-        canonicalize(decoder, canonDecoder)
-        canonicalize(tokens, canonTokens)
-
-        // Drop anything that is not one of the three canonical files.
-        staging.listFiles()?.forEach { f ->
-            if (f.name != names[0] && f.name != names[1] && f.name != names[2]) f.delete()
-        }
-
-        return ModelDownloader.safeInstall(staging, File(modelsDir, targetId), names).fold(
-            onSuccess = { ModelDownloader.Result.Success(targetId) },
-            onFailure = { ModelDownloader.Result.Error(ModelDownloader.MSG_IMPORT_IO) }
-        )
-    } finally {
-        if (staging.exists()) staging.deleteRecursively()
-        zipFile.delete()
-    }
-}
-
 class ModelDownloader(private val context: Context) {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .build()
 
     fun modelsDir(): File = File(context.filesDir, "models").also { it.mkdirs() }
-
-    fun modelDir(id: String): File = File(modelsDir(), id)
-
-    /** True when the model dir holds all three required files, non-empty. */
-    fun isInstalled(id: String): Boolean = isInstalledDir(modelsDir(), id)
-
-    /**
-     * True when the installed model for [id] can transcribe multiple
-     * languages. Catalog entries answer from the catalog; the import slot is
-     * read from the ONNX metadata written by the sherpa Whisper export.
-     */
-    fun isInstalledMultilingual(id: String): Boolean =
-        isInstalledMultilingualDir(modelsDir(), id)
-
-    /**
-     * Returns (encoder, decoder, tokens) for the given id, or null when any
-     * required file is missing or empty.
-     */
-    fun resolvePaths(id: String): Triple<File, File, File>? = resolvePathsIn(modelsDir(), id)
+    fun modelDir(id: String): File {
+        require(id == ModelCatalog.IMPORT_ID || ModelCatalog.byId(id) != null) { "Unknown model ID: $id" }
+        return File(modelsDir(), modelDirectoryName(id))
+    }
+    fun isInstalled(id: String): Boolean = resolveModel(id) != null
+    fun resolveModel(id: String): ResolvedModel? = resolveModelIn(modelsDir(), id)
+    fun modelSpec(id: String): ModelSpec? = resolveModel(id)?.spec ?: ModelCatalog.byId(id)
+    private fun modelDirectoryName(id: String): String = directoryNameForModel(id)
 
     /** Deletes the legacy RTranslator install folder (whisper_small_int8). */
-    fun purgeLegacyInstall() {
-        purgeLegacyDir(modelsDir())
-    }
+    fun purgeLegacyInstall() = purgeLegacyDir(modelsDir())
 
-    /**
-     * Downloads the three files of the catalog model [id] into
-     * models/<id>/ with their final names. Progress reports the sum of bytes
-     * across all files against the sum of known content lengths. A partial or
-     * failed download is never counted as installed (all three files are
-     * required), and other model dirs are never touched.
-     */
     suspend fun download(id: String, onProgress: (done: Long, total: Long) -> Unit): Result =
         withContext(Dispatchers.IO) {
             val spec = ModelCatalog.byId(id)
-            if (spec == null) return@withContext Result.Error("Unknown model id: $id")
+                ?: return@withContext Result.Error("Unknown model id: $id")
             try {
-                if (isInstalled(id)) return@withContext Result.Success(id)
-
-                val dir = modelDir(id)
-                dir.mkdirs()
-
-                val files = listOf(
-                    spec.encoderFileName to spec.encoderUrl(),
-                    spec.decoderFileName to spec.decoderUrl(),
-                    spec.tokensFileName to spec.tokensUrl(),
-                )
-
-                // Sum content lengths up front so progress has a stable total.
-                var total = 0L
-                for ((_, url) in files) {
-                    try {
-                        val head = Request.Builder().url(url).head().build()
-                        client.newCall(head).execute().use { resp ->
-                            if (resp.isSuccessful) {
-                                val len = resp.body?.contentLength() ?: -1L
-                                if (len > 0) total += len
-                            }
-                        }
-                    } catch (e: Exception) {
-                        // Totals stay partial; progress falls back to bytes done.
+                if (resolveModel(id) != null) return@withContext Result.Success(id)
+                validateSpec(spec)?.let { return@withContext Result.Error(it) }
+                val root = modelsDir()
+                val staging = File(root, ".${id}.staging-${UUID.randomUUID()}")
+                staging.mkdirs()
+                try {
+                    fetchArtifacts(spec, staging, onProgress)
+                    val missing = verifyPackage(staging, spec)
+                    if (missing != null) return@withContext Result.Error(missing)
+                    val generation = newGeneration()
+                    ModelManifest.write(staging, spec, generation)
+                    val installed = LocalAsrEngine.withModelMutation {
+                        safeInstall(staging, modelDir(id), spec.layout.requiredPaths + ModelManifest.FILE_NAME)
                     }
+                    installed.fold(
+                        onSuccess = { Result.Success(id) },
+                        onFailure = { Result.Error(it.message ?: MSG_INSTALL_IO) },
+                    )
+                } finally {
+                    staging.deleteRecursively()
                 }
-
-                var done = 0L
-                for ((name, url) in files) {
-                    val part = File(dir, "$name.part")
-                    part.delete()
-                    val request = Request.Builder().url(url).get().build()
-                    client.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) {
-                            part.delete()
-                            return@withContext Result.Error(
-                                "Download failed: HTTP ${response.code} ($name)"
-                            )
-                        }
-                        val body = response.body
-                            ?: return@withContext Result.Error("Empty response ($name)")
-                        body.byteStream().use { input ->
-                            FileOutputStream(part).use { out ->
-                                val buffer = ByteArray(64 * 1024)
-                                while (true) {
-                                    val read = input.read(buffer)
-                                    if (read < 0) break
-                                    out.write(buffer, 0, read)
-                                    done += read
-                                    onProgress(done, total)
-                                }
-                            }
-                        }
-                    }
-                    if (!part.renameTo(File(dir, name))) {
-                        part.delete()
-                        return@withContext Result.Error("Failed to write model file: $name")
-                    }
-                }
-
-                if (resolvePaths(id) == null) {
-                    return@withContext Result.Error("Model files incomplete after download")
-                }
-                Result.Success(id)
             } catch (e: Exception) {
-                modelDir(id).listFiles()?.forEach { f ->
-                    if (f.name.endsWith(".part")) f.delete()
-                }
                 Result.Error(e.message ?: "Download failed")
             }
         }
 
-    /**
-     * Copies a sherpa Whisper zip from [uri] into staging, validates the three
-     * required files, installs them into the detected catalog id folder or the
-     * import slot, and returns Success with the installed id.
-     */
     suspend fun importFromUri(uri: Uri, onProgress: (copied: Long, total: Long) -> Unit): Result =
         withContext(Dispatchers.IO) {
-            val partFile = File(modelsDir(), "import.zip.part")
+            val partFile = File(modelsDir(), "import-${UUID.randomUUID()}.zip.part")
             try {
                 val resolver = context.contentResolver
                 val total = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
                 val input = try {
-                    resolver.openInputStream(uri)
-                        ?: return@withContext Result.Error(MSG_IMPORT_READ)
+                    resolver.openInputStream(uri) ?: return@withContext Result.Error(MSG_IMPORT_READ)
                 } catch (e: Exception) {
-                    partFile.delete()
                     return@withContext Result.Error(MSG_IMPORT_READ)
                 }
-                try {
-                    input.use { stream ->
-                        FileOutputStream(partFile).use { out ->
-                            val buffer = ByteArray(64 * 1024)
-                            var copied = 0L
-                            while (true) {
-                                val read = stream.read(buffer)
-                                if (read < 0) break
-                                out.write(buffer, 0, read)
-                                copied += read
-                                onProgress(copied, total)
-                            }
+                input.use { stream ->
+                    FileOutputStream(partFile).use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var copied = 0L
+                        while (true) {
+                            val count = stream.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            copied += count
+                            onProgress(copied, total)
                         }
                     }
-                } catch (e: IOException) {
-                    partFile.delete()
-                    return@withContext Result.Error(MSG_IMPORT_IO)
                 }
                 installImportZip(partFile, modelsDir())
             } catch (e: Exception) {
+                Result.Error(e.message ?: MSG_IMPORT_READ)
+            } finally {
                 partFile.delete()
-                Result.Error(MSG_IMPORT_READ)
             }
         }
 
-    /** Deletes the install for [id] (downloads and imports alike). */
     fun delete(id: String) {
-        modelDir(id).deleteRecursively()
+        require(id == ModelCatalog.IMPORT_ID || ModelCatalog.byId(id) != null) { "Unknown model ID: $id" }
+        val root = modelsDir()
+        LocalAsrEngine.withModelMutation {
+            val directory = File(root, modelDirectoryName(id))
+            migrateLegacyCatalogDirectory(root, id, directory)
+            directory.deleteRecursively()
+        }
     }
 
     sealed class Result {
@@ -245,125 +110,199 @@ class ModelDownloader(private val context: Context) {
     }
 
     companion object {
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .build()
         const val MSG_IMPORT_READ = "Could not read the selected file"
-        const val MSG_IMPORT_INVALID = "Invalid sherpa Whisper package (missing files)"
+        const val MSG_IMPORT_INVALID = "Invalid model package"
         const val MSG_IMPORT_IO = "Not enough space or write failed"
-
-        val ENCODER_SUFFIXES = listOf("encoder.int8.onnx", "encoder.onnx")
-        val DECODER_SUFFIXES = listOf("decoder.int8.onnx", "decoder.onnx")
-        val TOKENS_SUFFIXES = listOf("tokens.txt")
-
-        /**
-         * Canonical file basenames inside a model dir for the given id.
-         * Catalog ids use <id>-encoder.int8.onnx etc.; the import slot uses
-         * encoder.int8.onnx etc.
-         */
-        fun requiredFileNames(id: String): List<String> = when (id) {
-            ModelCatalog.IMPORT_ID -> listOf("encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt")
-            else -> {
-                val spec = ModelCatalog.byId(id) ?: return emptyList()
-                listOf(spec.encoderFileName, spec.decoderFileName, spec.tokensFileName)
-            }
+        const val MSG_INSTALL_IO = "Not enough space or model install failed"
+        const val MULTILINGUAL_METADATA_KEY = "is_multilingual"
+        private const val METADATA_TAIL_BYTES = 64 * 1024L
+        private fun directoryNameForModel(id: String): String =
+            if (id == ModelCatalog.IMPORT_ID) id else "downloaded-$id"
+        private fun migrateLegacyCatalogDirectory(modelsDir: File, id: String, directory: File) {
+            if (id == ModelCatalog.IMPORT_ID) return
+            val legacyDirectory = File(modelsDir, id)
+            if (!directory.exists() && legacyDirectory.isDirectory) legacyDirectory.renameTo(directory)
         }
 
-        fun isInstalledDir(dir: File, id: String): Boolean = resolvePathsIn(dir, id) != null
-
-        fun resolvePathsIn(dir: File, id: String): Triple<File, File, File>? {
-            val modelDir = File(dir, id)
-            if (id == ModelCatalog.IMPORT_ID) {
-                val encoder = findFirst(modelDir, ENCODER_SUFFIXES) ?: return null
-                val decoder = findFirst(modelDir, DECODER_SUFFIXES) ?: return null
-                val tokens = findFirst(modelDir, TOKENS_SUFFIXES) ?: return null
-                return Triple(encoder, decoder, tokens)
+        /** Shared catalog acquisition for Android installs and opt-in host replay. */
+        fun fetchArtifacts(
+            spec: ModelSpec,
+            directory: File,
+            onProgress: (done: Long, total: Long) -> Unit = { _, _ -> },
+        ) {
+            validateSpec(spec)?.let { throw IllegalArgumentException(it) }
+            var total = 0L
+            var totalKnown = true
+            for (artifact in spec.artifacts) {
+                require(artifact.url.isNotBlank()) { "No download URL for ${artifact.path}" }
+                val size = artifact.sizeBytes ?: runCatching {
+                    client.newCall(Request.Builder().url(artifact.url).head().build()).execute().use {
+                        if (it.isSuccessful) it.body?.contentLength()?.takeIf { length -> length > 0 } else null
+                    }
+                }.getOrNull()
+                if (size == null) totalKnown = false else total += size
             }
-            val spec = ModelCatalog.byId(id) ?: return null
-            val encoder = File(modelDir, spec.encoderFileName)
-            val decoder = File(modelDir, spec.decoderFileName)
-            val tokens = File(modelDir, spec.tokensFileName)
-            if (!encoder.isFile || encoder.length() == 0L) return null
-            if (!decoder.isFile || decoder.length() == 0L) return null
-            if (!tokens.isFile || tokens.length() == 0L) return null
-            return Triple(encoder, decoder, tokens)
-        }
-
-        /**
-         * Multilingual flag for an installed model under [dir]. English-only
-         * and unknown models answer false so no language is ever forced on a
-         * model that cannot accept one. The import slot is read from its
-         * encoder ONNX metadata: the sherpa export writes `is_multilingual`
-         * only there, never into the decoder.
-         */
-        fun isInstalledMultilingualDir(dir: File, id: String): Boolean {
-            if (id != ModelCatalog.IMPORT_ID) {
-                return ModelCatalog.byId(id)?.isMultilingual == true
-            }
-            val paths = resolvePathsIn(dir, id) ?: return false
-            return cachedImportMultilingual(paths.first)
-        }
-
-        /** Single-entry memo of the import encoder's metadata flag. */
-        private class CachedMultilingual(
-            val path: String,
-            val length: Long,
-            val lastModified: Long,
-            val result: Boolean,
-        )
-
-        private val multilingualCacheLock = Any()
-        private var multilingualCache: CachedMultilingual? = null
-
-        /**
-         * Reuses the last read result while the encoder's path, length and
-         * mtime are unchanged; otherwise re-reads and replaces the entry.
-         */
-        private fun cachedImportMultilingual(encoder: File): Boolean {
-            val path = encoder.absolutePath
-            val length = encoder.length()
-            val lastModified = encoder.lastModified()
-            synchronized(multilingualCacheLock) {
-                val hit = multilingualCache
-                if (hit != null && hit.path == path &&
-                    hit.length == length && hit.lastModified == lastModified
-                ) {
-                    return hit.result
+            if (!totalKnown) total = -1L
+            var done = 0L
+            val buffer = ByteArray(64 * 1024)
+            for (artifact in spec.artifacts) {
+                val destination = containedFile(directory, artifact.path)
+                if (destination.isFile && destination.length() > 0) {
+                    verifyArtifact(destination, artifact)
+                    done += destination.length()
+                    onProgress(done, total)
+                    continue
                 }
-                val result = isMultilingualOnnx(encoder)
-                multilingualCache = CachedMultilingual(path, length, lastModified, result)
-                return result
+                destination.parentFile?.mkdirs()
+                val part = File(destination.parentFile, destination.name + ".part")
+                try {
+                    val digest = artifact.sha256?.let { MessageDigest.getInstance("SHA-256") }
+                    val request = Request.Builder().url(artifact.url).get().build()
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) throw IOException(
+                            "Download failed: HTTP ${response.code} (${artifact.path})",
+                        )
+                        val body = response.body ?: throw IOException("Empty response (${artifact.path})")
+                        body.byteStream().use { input ->
+                            FileOutputStream(part).use { output ->
+                                while (true) {
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    output.write(buffer, 0, count)
+                                    digest?.update(buffer, 0, count)
+                                    done += count
+                                    onProgress(done, total)
+                                }
+                            }
+                        }
+                    }
+                    require(part.length() > 0) { "Empty downloaded artifact: ${artifact.path}" }
+                    artifact.sizeBytes?.let {
+                        require(part.length() == it) { "Downloaded size mismatch: ${artifact.path}" }
+                    }
+                    if (digest != null) {
+                        val hash = digest.digest().joinToString("") { "%02x".format(it) }
+                        require(hash.equals(artifact.sha256, ignoreCase = true)) {
+                            "Downloaded SHA-256 mismatch: ${artifact.path}"
+                        }
+                    }
+                    if (!part.renameTo(destination)) throw IOException("Failed to write model file: ${artifact.path}")
+                } finally {
+                    part.delete()
+                }
             }
+        }
+
+        fun resolveModelIn(modelsDir: File, id: String): ResolvedModel? {
+            if (id.isBlank() || '/' in id || '\\' in id || id == "." || id == "..") return null
+            if (id != ModelCatalog.IMPORT_ID && ModelCatalog.byId(id) == null) return null
+            val directory = File(modelsDir, directoryNameForModel(id))
+            if (id != ModelCatalog.IMPORT_ID) {
+                LocalAsrEngine.withModelMutation {
+                    migrateLegacyCatalogDirectory(modelsDir, id, directory)
+                }
+            }
+            if (!directory.isDirectory) return null
+            val installedManifest = File(directory, ModelManifest.FILE_NAME)
+            if (installedManifest.isFile) {
+                val manifest = try { ModelManifest.read(directory) } catch (_: Exception) { return null }
+                if (manifest.spec.id != id || validateSpec(manifest.spec) != null) return null
+                if (verifyPackage(directory, manifest.spec) != null) return null
+                val generation = manifest.generation.takeIf { it.isNotBlank() }
+                    ?: legacyGeneration(directory, manifest.spec)
+                return ResolvedModel(manifest.spec, directory, generation)
+            }
+            val catalog = ModelCatalog.byId(id)
+            val spec = if (catalog != null) legacyCatalogSpec(directory, catalog)
+                else legacyImportSpec(directory) ?: return null
+            if (verifyPackage(directory, spec) != null) return null
+            val generation = legacyGeneration(directory, spec)
+            // Persist one descriptor without downloading or altering model weights.
+            try {
+                LocalAsrEngine.withModelMutation { ModelManifest.write(directory, spec, generation) }
+            } catch (_: Exception) {
+                return ResolvedModel(spec, directory, generation)
+            }
+            return ResolvedModel(spec, directory, generation)
+        }
+
+        fun resolveModelDirectory(directory: File, spec: ModelSpec): ResolvedModel? {
+            if (!directory.isDirectory || validateSpec(spec) != null) return null
+            val manifestFile = File(directory, ModelManifest.FILE_NAME)
+            val manifest = if (manifestFile.isFile) {
+                try { ModelManifest.read(directory) } catch (_: Exception) { return null }
+            } else null
+            val effectiveSpec = manifest?.spec ?: spec
+            if (effectiveSpec.id != spec.id || verifyPackage(directory, effectiveSpec) != null) return null
+            val generation = manifest?.generation?.takeIf { it.isNotBlank() }
+                ?: legacyGeneration(directory, effectiveSpec)
+            if (manifest == null) {
+                try { LocalAsrEngine.withModelMutation { ModelManifest.write(directory, effectiveSpec, generation) } }
+                catch (_: Exception) { /* host cache may be read-only */ }
+            }
+            return ResolvedModel(effectiveSpec, directory, generation)
+        }
+
+        /** Installs either a versioned descriptor package or a narrowly recognized legacy Whisper ZIP. */
+        internal fun installImportZip(zipFile: File, modelsDir: File): Result {
+            val staging = File(modelsDir, ".import.staging-${UUID.randomUUID()}")
+            try {
+                staging.mkdirs()
+                extractZip(zipFile, staging)
+                normalizePackageRoot(staging)
+                val packageManifest = File(staging, ModelManifest.FILE_NAME)
+                val packageSpec = if (packageManifest.isFile) {
+                    val parsed = ModelManifest.read(staging).spec
+                    parsed.copy(
+                        id = ModelCatalog.IMPORT_ID,
+                        artifacts = parsed.artifacts.map { it.copy(url = "") },
+                    )
+                } else {
+                    legacyImportSpec(staging) ?: return Result.Error(MSG_IMPORT_INVALID)
+                }
+                validateSpec(packageSpec)?.let { return Result.Error(it) }
+                verifyPackage(staging, packageSpec)?.let { return Result.Error(it) }
+                val generation = newGeneration()
+                ModelManifest.write(staging, packageSpec, generation)
+                val installed = LocalAsrEngine.withModelMutation {
+                    safeInstall(staging, File(modelsDir, packageSpec.id), packageSpec.layout.requiredPaths + ModelManifest.FILE_NAME)
+                }
+                return installed.fold(
+                    onSuccess = { Result.Success(packageSpec.id) },
+                    onFailure = { Result.Error(it.message ?: MSG_IMPORT_IO) },
+                )
+            } catch (e: IllegalArgumentException) {
+                return Result.Error(e.message ?: MSG_IMPORT_INVALID)
+            } catch (e: Exception) {
+                return Result.Error(e.message ?: MSG_IMPORT_READ)
+            } finally {
+                staging.deleteRecursively()
+                zipFile.delete()
+            }
+        }
+
+        fun purgeLegacyDir(modelsDir: File) {
+            LocalAsrEngine.withModelMutation { File(modelsDir, ModelCatalog.LEGACY_FOLDER).deleteRecursively() }
         }
 
         /** ONNX metadata key the sherpa Whisper export writes as "0"/"1". */
-        const val MULTILINGUAL_METADATA_KEY = "is_multilingual"
+        fun isMultilingualOnnx(file: File): Boolean = readMetadataValue(file, MULTILINGUAL_METADATA_KEY) == "1"
 
-        /** The metadata block sits within a few KB of the end of the file. */
-        private const val METADATA_TAIL_BYTES = 64 * 1024
-
-        /**
-         * Reads the `is_multilingual` flag from an ONNX file's metadata.
-         * Missing or unreadable metadata yields false.
-         */
-        fun isMultilingualOnnx(file: File): Boolean =
-            readMetadataValue(file, MULTILINGUAL_METADATA_KEY) == "1"
-
-        /**
-         * Returns the value of the ONNX metadata entry named [key] by scanning
-         * the end of the protobuf file. ONNX stores metadata as repeated
-         * {key, value} string pairs; each string is a length-delimited field
-         * (key: field 1, value: field 2), so the value follows the key bytes.
-         */
         internal fun readMetadataValue(file: File, key: String): String? {
             if (!file.isFile || file.length() == 0L) return null
-            val tailSize = minOf(file.length(), METADATA_TAIL_BYTES.toLong()).toInt()
+            val tailSize = minOf(file.length(), METADATA_TAIL_BYTES).toInt()
             val tail = ByteArray(tailSize)
             try {
                 RandomAccessFile(file, "r").use { raf ->
                     raf.seek(file.length() - tailSize)
                     raf.readFully(tail)
                 }
-            } catch (e: Exception) {
-                return null
-            }
+            } catch (_: Exception) { return null }
             val needle = key.toByteArray(Charsets.US_ASCII)
             var searchFrom = 0
             while (searchFrom <= tail.size - needle.size) {
@@ -374,7 +313,221 @@ class ModelDownloader(private val context: Context) {
             return null
         }
 
-        /** Parses a length-delimited string (protobuf field 2) at [pos]. */
+        private fun legacyCatalogSpec(directory: File, catalog: ModelSpec): ModelSpec {
+            val artifacts = directory.walkTopDown()
+                .filter { it.isFile && it.name != ModelManifest.FILE_NAME && !it.name.endsWith(".part") }
+                .map { ModelArtifact(relativePath(directory, it), "") }
+                .toList()
+            return catalog.copy(artifacts = artifacts)
+        }
+
+        private fun legacyImportSpec(directory: File): ModelSpec? {
+            val files = directory.walkTopDown().filter { it.isFile && it.name != ModelManifest.FILE_NAME }.toList()
+            val encoders = files.filter { it.name.endsWith("encoder.int8.onnx") || it.name.endsWith("encoder.onnx") }
+            val decoders = files.filter { it.name.endsWith("decoder.int8.onnx") || it.name.endsWith("decoder.onnx") }
+            val tokens = files.filter { it.name.endsWith("tokens.txt") }
+            if (encoders.size != 1 || decoders.size != 1 || tokens.size != 1) return null
+            val encoder = relativePath(directory, encoders.single())
+            val decoder = relativePath(directory, decoders.single())
+            val tokenPath = relativePath(directory, tokens.single())
+            // Catalog prefixes retain useful display and language metadata, never catalog identity.
+            val catalogId = ModelCatalog.entries.firstOrNull { encoder.substringAfterLast('/').startsWith("${it.id}-") }?.id
+            if (catalogId != null) {
+                val known = ModelCatalog.byId(catalogId) ?: return null
+                return known.copy(
+                    id = ModelCatalog.IMPORT_ID,
+                    title = "Imported ${known.title}",
+                    layout = ModelLayout.Whisper(encoder, decoder, tokenPath),
+                    artifacts = files.map { ModelArtifact(relativePath(directory, it), "") },
+                )
+            }
+            val multilingual = isMultilingualOnnx(encoders.single())
+            val policy = if (multilingual) {
+                LanguagePolicy.Selectable(ModelCatalog.languageOptions.map { it.code })
+            } else LanguagePolicy.Fixed("en", "English")
+            return ModelSpec(
+                id = ModelCatalog.IMPORT_ID,
+                title = "Imported model",
+                approxSizeMb = 0,
+                layout = ModelLayout.Whisper(encoder, decoder, tokenPath),
+                languagePolicy = policy,
+                artifacts = files.map { ModelArtifact(relativePath(directory, it), "") },
+            )
+        }
+
+
+        private fun extractZip(zipFile: File, destination: File) {
+            val seen = mutableSetOf<String>()
+            ZipInputStream(zipFile.inputStream().buffered()).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    val name = entry.name.removeSuffix("/")
+                    if (name.isNotEmpty() && isFinderMetadataEntry(name)) {
+                        zip.closeEntry()
+                        continue
+                    }
+                    if (name.isNotEmpty()) validateRelativePath(name)
+                    if (!entry.isDirectory) {
+                        require(seen.add(name)) { "Duplicate package path: $name" }
+                        val out = containedFile(destination, name)
+                        out.parentFile?.mkdirs()
+                        FileOutputStream(out).use { zip.copyTo(it) }
+                    }
+                    zip.closeEntry()
+                }
+            }
+        }
+        private fun isFinderMetadataEntry(path: String): Boolean {
+            val segments = path.split('/')
+            return "__MACOSX" in segments || segments.any { it.startsWith("._") || it == ".DS_Store" }
+        }
+
+
+        private fun normalizePackageRoot(directory: File) {
+            if (File(directory, ModelManifest.FILE_NAME).isFile) return
+            val manifests = directory.walkTopDown().filter { it.isFile && it.name == ModelManifest.FILE_NAME }.toList()
+            if (manifests.isEmpty()) return
+            require(manifests.size == 1) { "Model manifest is ambiguous" }
+            val packageRoot = manifests.single().parentFile
+            require(packageRoot != directory) { "Model package root is ambiguous" }
+            val outside = directory.listFiles().orEmpty().filter { it != packageRoot && it != packageRoot.let { root ->
+                var child = root
+                while (child.parentFile != directory && child.parentFile != null) child = child.parentFile
+                child
+            } }
+            require(outside.isEmpty()) { "Model package contains files outside its manifest root" }
+            val files = packageRoot.walkTopDown().filter { it.isFile }.toList()
+            for (source in files) {
+                val relative = relativePath(packageRoot, source)
+                val target = containedFile(directory, relative)
+                require(!target.exists()) { "Duplicate package path: $relative" }
+                target.parentFile?.mkdirs()
+                if (!source.renameTo(target)) source.copyTo(target).also { source.delete() }
+            }
+            packageRoot.deleteRecursively()
+        }
+
+        private fun validateSpec(spec: ModelSpec): String? {
+            if (spec.id.isBlank() || spec.title.isBlank()) return "Model descriptor is missing an ID or title"
+            val artifacts = spec.artifacts.map { it.path }
+            if (artifacts.isEmpty() || artifacts.distinct().size != artifacts.size) return "Model descriptor has missing or duplicate artifacts"
+            if (ModelManifest.FILE_NAME in artifacts) return "Model artifact path is reserved: ${ModelManifest.FILE_NAME}"
+            try { artifacts.forEach(::validateRelativePath) } catch (e: IllegalArgumentException) { return e.message }
+            val required = spec.layout.requiredPaths
+            if (required.distinct().size != required.size || required.any { it !in artifacts }) {
+                return "Model descriptor artifacts do not include every required role"
+            }
+            when (val layout = spec.layout) {
+                is ModelLayout.Whisper -> if (listOf(layout.encoder, layout.decoder, layout.tokens).any { it !in artifacts }) return "Whisper role paths do not match artifacts"
+                is ModelLayout.NemoCtc -> if (listOf(layout.model, layout.tokens).any { it !in artifacts }) return "NeMo CTC role paths do not match artifacts"
+                is ModelLayout.Canary -> if (listOf(layout.encoder, layout.decoder, layout.tokens).any { it !in artifacts }) return "Canary role paths do not match artifacts"
+            }
+            return null
+        }
+
+        private fun verifyPackage(directory: File, spec: ModelSpec): String? {
+            validateSpec(spec)?.let { return it }
+            val declared = spec.artifacts.map { it.path }.toSet()
+            val required = spec.layout.requiredPaths
+            for (path in required) {
+                val file = try { containedFile(directory, path) } catch (e: Exception) { return e.message }
+                if (!file.isFile || file.length() == 0L) return "Model package is missing required file: $path"
+            }
+            for (path in declared) {
+                val file = containedFile(directory, path)
+                if (!file.isFile || file.length() == 0L) return "Model package is missing declared artifact: $path"
+            }
+            val actual = directory.walkTopDown()
+                .filter { it.isFile && it.name != ModelManifest.FILE_NAME && !it.name.endsWith(".part") }
+                .map { relativePath(directory, it) }.toSet()
+            val undeclared = actual - declared
+            if (undeclared.isNotEmpty()) return "Model package contains undeclared files: ${undeclared.sorted()}"
+            return null
+        }
+
+        private fun verifyArtifact(file: File, artifact: ModelArtifact) {
+            artifact.sizeBytes?.let { require(file.length() == it) { "Downloaded size mismatch: ${artifact.path}" } }
+            artifact.sha256?.let { expected ->
+                val digest = MessageDigest.getInstance("SHA-256")
+                file.inputStream().buffered().use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                val actual = digest.digest().joinToString("") { "%02x".format(it) }
+                require(actual.equals(expected, ignoreCase = true)) { "Downloaded SHA-256 mismatch: ${artifact.path}" }
+            }
+        }
+
+        private fun safeInstall(stagingDir: File, targetDir: File, requiredNames: List<String>): kotlin.Result<Unit> {
+            val backupDir = File(targetDir.parentFile, targetDir.name + ".backup")
+            var backedUp = false
+            try {
+                if (!stagingDir.isDirectory) return kotlin.Result.failure(IllegalArgumentException("Staging dir is not a directory"))
+                val missing = verifyRequiredFiles(stagingDir, requiredNames)
+                if (missing.isNotEmpty()) return kotlin.Result.failure(IllegalArgumentException("Staging dir missing required files: $missing"))
+                backupDir.deleteRecursively()
+                if (targetDir.exists()) {
+                    if (!targetDir.renameTo(backupDir)) return kotlin.Result.failure(IllegalStateException("Failed to back up existing model"))
+                    backedUp = true
+                }
+                if (!stagingDir.renameTo(targetDir)) {
+                    if (backedUp && !backupDir.renameTo(targetDir)) {
+                        backupDir.copyRecursively(targetDir, overwrite = true)
+                        backupDir.deleteRecursively()
+                    }
+                    return kotlin.Result.failure(IllegalStateException("Failed to move staged model into place"))
+                }
+                backupDir.deleteRecursively()
+                return kotlin.Result.success(Unit)
+            } catch (e: Exception) {
+                if (backedUp && !targetDir.exists()) backupDir.renameTo(targetDir)
+                return kotlin.Result.failure(e)
+            } finally {
+                if (stagingDir.exists()) stagingDir.deleteRecursively()
+            }
+        }
+
+        private fun verifyRequiredFiles(directory: File, paths: List<String>): List<String> = paths.filter {
+            val file = try { containedFile(directory, it) } catch (_: Exception) { return@filter true }
+            !file.isFile || file.length() == 0L
+        }
+
+        private fun validateRelativePath(path: String) {
+            require(path.isNotBlank() && '\u0000' !in path && '\\' !in path && !path.startsWith('/') && !Regex("^[A-Za-z]:").containsMatchIn(path)) {
+                "Unsafe model path: $path"
+            }
+            val parts = path.split('/')
+            require(parts.all { it.isNotBlank() && it != "." && it != ".." }) { "Unsafe model path: $path" }
+        }
+
+        private fun containedFile(root: File, path: String): File {
+            validateRelativePath(path)
+            val base = root.canonicalFile
+            val file = File(root, path).canonicalFile
+            require(file.path.startsWith(base.path + File.separator)) { "Unsafe model path: $path" }
+            return file
+        }
+
+        private fun relativePath(root: File, file: File): String =
+            file.relativeTo(root).invariantSeparatorsPath
+
+        private fun legacyGeneration(directory: File, spec: ModelSpec): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            spec.artifacts.forEach { artifact ->
+                val file = containedFile(directory, artifact.path)
+                digest.update(artifact.path.toByteArray(Charsets.UTF_8))
+                digest.update(file.length().toString().toByteArray(Charsets.UTF_8))
+                digest.update(file.lastModified().toString().toByteArray(Charsets.UTF_8))
+            }
+            return digest.digest().take(12).joinToString("") { "%02x".format(it) }
+        }
+
+        private fun newGeneration(): String = UUID.randomUUID().toString()
+
         private fun readLengthDelimitedString(buffer: ByteArray, pos: Int): String? {
             var p = pos
             if (p >= buffer.size || (buffer[p].toInt() and 0xFF) != 0x12) return null
@@ -382,8 +535,7 @@ class ModelDownloader(private val context: Context) {
             var length = 0
             var shift = 0
             while (p < buffer.size && shift <= 14) {
-                val b = buffer[p].toInt() and 0xFF
-                p++
+                val b = buffer[p++].toInt() and 0xFF
                 length = length or ((b and 0x7F) shl shift)
                 if ((b and 0x80) == 0) {
                     if (length <= 0 || length > 64 || p + length > buffer.size) return null
@@ -395,135 +547,12 @@ class ModelDownloader(private val context: Context) {
         }
 
         private fun indexOfBytes(haystack: ByteArray, needle: ByteArray, from: Int): Int? {
-            if (needle.isEmpty()) return null
             for (i in from..haystack.size - needle.size) {
-                var match = true
-                for (j in needle.indices) {
-                    if (haystack[i + j] != needle[j]) {
-                        match = false
-                        break
-                    }
-                }
-                if (match) return i
+                var matches = true
+                for (j in needle.indices) if (haystack[i + j] != needle[j]) { matches = false; break }
+                if (matches) return i
             }
             return null
-        }
-
-        fun purgeLegacyDir(modelsDir: File) {
-            File(modelsDir, ModelCatalog.LEGACY_FOLDER).deleteRecursively()
-        }
-
-        /**
-         * Detects a catalog id from an imported encoder basename prefix
-         * (<id>-), or null for unknown packages.
-         */
-        fun detectCatalogId(encoderName: String): String? =
-            ModelCatalog.entries.firstOrNull { encoderName.startsWith("${it.id}-") }?.id
-
-        /**
-         * Locates the three logical files in a flat extracted dir.
-         * Prefers int8 encoder/decoder names; falls back to plain .onnx.
-         * Returns null when any file is missing or empty.
-         */
-        fun findModelFiles(dir: File): Triple<File, File, File>? {
-            val encoder = findFirst(dir, ENCODER_SUFFIXES) ?: return null
-            val decoder = findFirst(dir, DECODER_SUFFIXES) ?: return null
-            val tokens = findFirst(dir, TOKENS_SUFFIXES) ?: return null
-            return Triple(encoder, decoder, tokens)
-        }
-
-        fun findFirst(dir: File, suffixes: List<String>): File? {
-            if (!dir.isDirectory) return null
-            for (suffix in suffixes) {
-                val match = dir.listFiles()?.firstOrNull {
-                    it.isFile && it.name.endsWith(suffix) && it.length() > 0L
-                }
-                if (match != null) return match
-            }
-            return null
-        }
-
-        fun extractZipFlat(zipFile: File, destDir: File) {
-            val seenBasenames = mutableSetOf<String>()
-            ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
-                var entry: ZipEntry? = zis.nextEntry
-                while (entry != null) {
-                    if (!entry!!.isDirectory) {
-                        val basename = File(entry!!.name).name
-                        if (basename.isBlank()) {
-                            entry = zis.nextEntry
-                            continue
-                        }
-                        if (!seenBasenames.add(basename)) {
-                            throw IllegalArgumentException(
-                                "Duplicate required basename in archive: $basename"
-                            )
-                        }
-                        val outFile = File(destDir, basename)
-                        FileOutputStream(outFile).use { out -> zis.copyTo(out) }
-                    }
-                    entry = zis.nextEntry
-                }
-            }
-        }
-
-        fun verifyRequiredFiles(dir: File, requiredNames: List<String>): List<String> {
-            return requiredNames.filter { name ->
-                val f = File(dir, name)
-                !f.isFile || f.length() == 0L
-            }
-        }
-
-        /**
-         * Atomic-ish swap: verifies [requiredNames] in [stagingDir], backs up
-         * the existing target dir, then renames staging into place. On any
-         * failure the previous target is restored.
-         */
-        fun safeInstall(
-            stagingDir: File,
-            targetDir: File,
-            requiredNames: List<String>,
-        ): kotlin.Result<Unit> {
-            val backupDir = File(targetDir.parentFile, targetDir.name + ".backup")
-            var targetBackedUp = false
-            try {
-                if (!stagingDir.isDirectory) {
-                    return kotlin.Result.failure(IllegalArgumentException("Staging dir is not a directory: $stagingDir"))
-                }
-                val missing = verifyRequiredFiles(stagingDir, requiredNames)
-                if (missing.isNotEmpty()) {
-                    return kotlin.Result.failure(
-                        IllegalArgumentException("Staging dir missing required files: $missing")
-                    )
-                }
-                backupDir.deleteRecursively()
-                if (targetDir.exists()) {
-                    if (!targetDir.renameTo(backupDir)) {
-                        return kotlin.Result.failure(
-                            IllegalStateException("Failed to back up existing model: $targetDir")
-                        )
-                    }
-                    targetBackedUp = true
-                }
-                if (!stagingDir.renameTo(targetDir)) {
-                    if (targetBackedUp && !backupDir.renameTo(targetDir)) {
-                        backupDir.copyRecursively(targetDir, overwrite = true)
-                        backupDir.deleteRecursively()
-                    }
-                    return kotlin.Result.failure(
-                        IllegalStateException("Failed to rename staging to target: $stagingDir -> $targetDir")
-                    )
-                }
-                backupDir.deleteRecursively()
-                return kotlin.Result.success(Unit)
-            } catch (e: Exception) {
-                if (targetBackedUp && !targetDir.exists()) backupDir.renameTo(targetDir)
-                return kotlin.Result.failure(e)
-            } finally {
-                if (stagingDir.exists()) {
-                    stagingDir.deleteRecursively()
-                }
-            }
         }
     }
 }

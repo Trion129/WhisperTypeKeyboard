@@ -45,6 +45,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Installs beside a release build so device checks do not replace it.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -114,8 +119,9 @@ dependencies {
     implementation("androidx.preference:preference-ktx:1.2.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.4")
+    implementation("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1")
 
+    testImplementation("org.json:json:20250517")
     testImplementation("junit:junit:4.13.2")
 
     androidTestImplementation("androidx.test:core-ktx:1.6.1")

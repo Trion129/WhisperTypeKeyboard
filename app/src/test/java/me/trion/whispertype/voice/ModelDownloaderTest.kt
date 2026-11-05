@@ -1,403 +1,229 @@
 package me.trion.whispertype.voice
 
 import org.junit.Assert.*
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class ModelDownloaderTest {
-
-    @get:Rule
-    val tempFolder = TemporaryFolder()
-
-    private lateinit var modelsDir: File
-
-    @Before
-    fun setUp() {
-        modelsDir = tempFolder.newFolder("models")
-    }
-
-    private fun writeCatalogInstall(id: String) {
-        val dir = File(modelsDir, id).apply { mkdirs() }
-        val names = ModelDownloader.requiredFileNames(id)
-        names.forEach { File(dir, it).writeBytes(byteArrayOf(1)) }
-    }
-
-    // Install layout
+    @get:Rule val temp = TemporaryFolder()
+    private val models get() = File(temp.root, "models").apply { mkdirs() }
 
     @Test
-    fun `catalog install is not installed when a file is missing`() {
-        val dir = File(modelsDir, "tiny.en").apply { mkdirs() }
-        File(dir, "tiny.en-encoder.int8.onnx").writeBytes(byteArrayOf(1))
-        File(dir, "tiny.en-decoder.int8.onnx").writeBytes(byteArrayOf(1))
-        // tokens.txt missing
-        assertNull(ModelDownloader.resolvePathsIn(modelsDir, "tiny.en"))
-        assertFalse(ModelDownloader.isInstalledDir(modelsDir, "tiny.en"))
+    fun `legacy catalog files migrate without replacing weights and receive generation`() {
+        val spec = ModelCatalog.byId("tiny.en")!!
+        val dir = File(models, spec.id).apply { mkdirs() }
+        spec.layout.requiredPaths.forEach { File(dir, it).apply { parentFile?.mkdirs(); writeText("legacy:$it") } }
+        val before = spec.layout.requiredPaths.associateWith { File(dir, it).readBytes().toList() }
+
+        val resolved = ModelDownloader.resolveModelIn(models, spec.id)
+
+        assertNotNull(resolved)
+        val downloaded = File(models, "downloaded-${spec.id}")
+        assertTrue(File(downloaded, ModelManifest.FILE_NAME).isFile)
+        assertFalse(dir.exists())
+        assertEquals(before, spec.layout.requiredPaths.associateWith { File(downloaded, it).readBytes().toList() })
+        assertEquals(spec.id, resolved!!.spec.id)
+        assertTrue(resolved.generation.isNotBlank())
+        assertEquals(resolved.generation, ModelDownloader.resolveModelIn(models, spec.id)!!.generation)
     }
 
     @Test
-    fun `catalog install is not installed when a file is empty`() {
-        val dir = File(modelsDir, "base.en").apply { mkdirs() }
-        File(dir, "base.en-encoder.int8.onnx").writeBytes(byteArrayOf(1))
-        File(dir, "base.en-decoder.int8.onnx").writeBytes(byteArrayOf())
-        File(dir, "base.en-tokens.txt").writeBytes(byteArrayOf(1))
-        assertNull(ModelDownloader.resolvePathsIn(modelsDir, "base.en"))
+    fun `multilingual legacy migration round trips the auto language code`() {
+        val spec = ModelCatalog.byId("base")!!
+        val dir = File(models, spec.id).apply { mkdirs() }
+        spec.layout.requiredPaths.forEach { File(dir, it).apply { parentFile?.mkdirs(); writeText(it) } }
+
+        val first = ModelDownloader.resolveModelIn(models, spec.id)!!
+        val second = ModelDownloader.resolveModelIn(models, spec.id)!!
+
+        val policy = second.spec.languagePolicy as LanguagePolicy.Selectable
+        assertTrue(policy.codes.contains(""))
+        assertEquals(first.generation, second.generation)
     }
 
     @Test
-    fun `complete catalog install resolves all three paths`() {
-        writeCatalogInstall("small.en")
-        val paths = ModelDownloader.resolvePathsIn(modelsDir, "small.en")
-        assertNotNull(paths)
-        val (encoder, decoder, tokens) = paths!!
-        assertEquals("small.en-encoder.int8.onnx", encoder.name)
-        assertEquals("small.en-decoder.int8.onnx", decoder.name)
-        assertEquals("small.en-tokens.txt", tokens.name)
+    fun `catalog-prefixed legacy import keeps import identity across repeated resolution`() {
+        val dir = File(models, ModelCatalog.IMPORT_ID).apply { mkdirs() }
+        File(dir, "base-encoder.int8.onnx").writeText("encoder")
+        File(dir, "base-decoder.int8.onnx").writeText("decoder")
+        File(dir, "base-tokens.txt").writeText("tokens")
+
+        val first = ModelDownloader.resolveModelIn(models, ModelCatalog.IMPORT_ID)
+        val second = ModelDownloader.resolveModelIn(models, ModelCatalog.IMPORT_ID)
+
+        assertEquals(ModelCatalog.IMPORT_ID, first?.spec?.id)
+        assertEquals(ModelCatalog.IMPORT_ID, second?.spec?.id)
+        assertEquals(first?.generation, second?.generation)
     }
 
     @Test
-    fun `every catalog model resolves its three required files`() {
-        for (spec in ModelCatalog.entries) {
-            writeCatalogInstall(spec.id)
-            assertNotNull("missing files for ${spec.id}", ModelDownloader.resolvePathsIn(modelsDir, spec.id))
-        }
+    fun `legacy catalog directory migrates to downloaded storage without changing weights`() {
+        val spec = ModelCatalog.byId("tiny.en")!!
+        val legacy = File(models, spec.id).apply { mkdirs() }
+        spec.layout.requiredPaths.forEach { File(legacy, it).apply { parentFile?.mkdirs(); writeText("legacy:$it") } }
+        val before = spec.layout.requiredPaths.associateWith { File(legacy, it).readBytes().toList() }
+
+        val resolved = ModelDownloader.resolveModelIn(models, spec.id)
+        val downloaded = File(models, "downloaded-${spec.id}")
+
+        assertNotNull(resolved)
+        assertEquals(downloaded.canonicalFile, resolved!!.directory.canonicalFile)
+        assertFalse(legacy.exists())
+        assertEquals(before, spec.layout.requiredPaths.associateWith { File(downloaded, it).readBytes().toList() })
+        assertEquals(spec.id, resolved.spec.id)
     }
-
     @Test
-    fun `import detection recognizes multilingual catalog prefixes`() {
-        assertEquals("tiny", ModelDownloader.detectCatalogId("tiny-encoder.int8.onnx"))
-        assertEquals("base", ModelDownloader.detectCatalogId("base-encoder.int8.onnx"))
-        assertEquals("small", ModelDownloader.detectCatalogId("small-encoder.int8.onnx"))
-    }
-
-    // Multilingual detection
-
-    @Test
-    fun `onnx metadata reveals multilingual models`() {
-        val multilingual = tempFolder.newFile("multi-encoder.onnx").apply {
-            writeBytes(
-                onnxWithMetadata(
-                    "sot_sequence" to "50258,50259,50359,50363",
-                    "is_multilingual" to "1",
-                    "sot" to "50258"
-                )
-            )
-        }
-        assertTrue(ModelDownloader.isMultilingualOnnx(multilingual))
-
-        val englishOnly = tempFolder.newFile("en-encoder.onnx").apply {
-            writeBytes(onnxWithMetadata("is_multilingual" to "0"))
-        }
-        assertFalse(ModelDownloader.isMultilingualOnnx(englishOnly))
-    }
-
-    @Test
-    fun `onnx without the metadata key is treated as english only`() {
-        val plain = tempFolder.newFile("plain.onnx").apply {
-            writeBytes(onnxWithMetadata("sot" to "50257"))
-        }
-        assertFalse(ModelDownloader.isMultilingualOnnx(plain))
-        assertFalse(ModelDownloader.isMultilingualOnnx(File(tempFolder.root, "missing.onnx")))
-    }
-
-    @Test
-    fun `installed multilingual flag follows catalog entries`() {
-        writeCatalogInstall("base")
-        writeCatalogInstall("base.en")
-        assertTrue(ModelDownloader.isInstalledMultilingualDir(modelsDir, "base"))
-        assertFalse(ModelDownloader.isInstalledMultilingualDir(modelsDir, "base.en"))
-        assertFalse(ModelDownloader.isInstalledMultilingualDir(modelsDir, "unknown"))
-    }
-
-    @Test
-    fun `installed multilingual flag reads the import slot metadata`() {
-        writeImportInstall(multilingualMetadata = true)
-        assertTrue(ModelDownloader.isInstalledMultilingualDir(modelsDir, ModelCatalog.IMPORT_ID))
-
-        // Same byte length, so the cache can only notice the rewrite via mtime.
-        val encoder = File(
-            File(modelsDir, ModelCatalog.IMPORT_ID),
-            ModelDownloader.requiredFileNames(ModelCatalog.IMPORT_ID)[0],
+    fun `nested manifest import preserves sidecars and paths`() {
+        val zip = zip(
+            "bundle/model.json" to manifestJson(
+                backend = "nemo_ctc",
+                model = "graphs/model.int8.onnx",
+                tokens = "assets/tokens.txt",
+                artifacts = listOf("graphs/model.int8.onnx", "assets/tokens.txt", "graphs/model.onnx.data"),
+            ),
+            "bundle/graphs/model.int8.onnx" to "onnx",
+            "bundle/assets/tokens.txt" to "tokens",
+            "bundle/graphs/model.onnx.data" to "external weights",
         )
-        val before = encoder.lastModified()
-        writeImportInstall(multilingualMetadata = false)
-        encoder.setLastModified(before + 2000)
-        assertFalse(ModelDownloader.isInstalledMultilingualDir(modelsDir, ModelCatalog.IMPORT_ID))
+
+        val result = ModelDownloader.installImportZip(zip, models)
+
+        assertEquals(ModelDownloader.Result.Success(ModelCatalog.IMPORT_ID), result)
+        val installed = ModelDownloader.resolveModelIn(models, ModelCatalog.IMPORT_ID)!!
+        assertTrue(installed.spec.layout is ModelLayout.NemoCtc)
+        assertEquals("graphs/model.int8.onnx", (installed.spec.layout as ModelLayout.NemoCtc).model)
+        assertEquals("external weights", File(installed.directory, "graphs/model.onnx.data").readText())
+        assertTrue(File(installed.directory, ModelManifest.FILE_NAME).isFile)
     }
 
     @Test
-    fun `unknown id never resolves`() {
-        writeCatalogInstall("tiny.en")
-        assertNull(ModelDownloader.resolvePathsIn(modelsDir, "nope"))
-    }
-
-    // Flat extraction
-
-    @Test
-    fun `extractZipFlat flattens directory structure`() {
-        val zip = createZip(
-            "subdir/file1.onnx" to "data1",
-            "deep/nested/file2.onnx" to "data2"
+    fun `catalog-prefixed whisper zip installs only into import slot`() {
+        val catalogDir = File(models, "tiny")
+        val downloadedDir = File(models, "downloaded-tiny")
+        val zip = zip(
+            "tiny-encoder.int8.onnx" to "encoder",
+            "tiny-decoder.int8.onnx" to "decoder",
+            "tiny-tokens.txt" to "tokens",
         )
-        val dest = tempFolder.newFolder("dest")
-        ModelDownloader.extractZipFlat(zip, dest)
 
-        assertTrue(File(dest, "file1.onnx").isFile)
-        assertTrue(File(dest, "file2.onnx").isFile)
-        assertEquals("data1", File(dest, "file1.onnx").readText())
-        assertEquals("data2", File(dest, "file2.onnx").readText())
+        val result = ModelDownloader.installImportZip(zip, models)
+
+        assertEquals(ModelDownloader.Result.Success(ModelCatalog.IMPORT_ID), result)
+        assertEquals(ModelCatalog.IMPORT_ID, ModelDownloader.resolveModelIn(models, ModelCatalog.IMPORT_ID)?.spec?.id)
+        assertFalse(catalogDir.exists())
+        assertFalse(downloadedDir.exists())
     }
 
     @Test
-    fun `extractZipFlat rejects duplicate basenames`() {
-        val zip = createZip(
-            "a/file.onnx" to "first",
-            "b/file.onnx" to "second"
+    fun `Finder metadata entries are ignored during import`() {
+        val zip = zip(
+            "encoder.onnx" to "encoder",
+            "decoder.onnx" to "decoder",
+            "tokens.txt" to "tokens",
+            "__MACOSX/._encoder.onnx" to "appledouble",
+            "._encoder.onnx" to "appledouble",
+            ".DS_Store" to "finder metadata",
         )
-        val dest = tempFolder.newFolder("dest")
-        assertThrows(IllegalArgumentException::class.java) {
-            ModelDownloader.extractZipFlat(zip, dest)
-        }
+
+        val result = ModelDownloader.installImportZip(zip, models)
+
+        assertEquals(ModelDownloader.Result.Success(ModelCatalog.IMPORT_ID), result)
+        val installed = ModelDownloader.resolveModelIn(models, ModelCatalog.IMPORT_ID)!!
+        assertEquals("encoder", File(installed.directory, "encoder.onnx").readText())
+        assertFalse(File(installed.directory, "._encoder.onnx").exists())
+        assertFalse(File(installed.directory, ".DS_Store").exists())
     }
 
     @Test
-    fun `extractZipFlat skips directory entries`() {
-        val zip = createZip(
-            "dir/" to null,
-            "dir/file.onnx" to "data"
+    fun `invalid replacement preserves the prior imported package`() {
+        val good = zip(
+            "model.json" to manifestJson("nemo_ctc", "model.onnx", "tokens.txt", listOf("model.onnx", "tokens.txt")),
+            "model.onnx" to "old graph",
+            "tokens.txt" to "old tokens",
         )
-        val dest = tempFolder.newFolder("dest")
-        ModelDownloader.extractZipFlat(zip, dest)
-        assertTrue(File(dest, "file.onnx").isFile)
-    }
+        assertEquals(ModelDownloader.Result.Success(ModelCatalog.IMPORT_ID), ModelDownloader.installImportZip(good, models))
+        val old = File(models, ModelCatalog.IMPORT_ID).walkTopDown().filter { it.isFile }
+            .associate { it.relativeTo(File(models, ModelCatalog.IMPORT_ID)).invariantSeparatorsPath to it.readBytes().toList() }
 
-    // Import
-
-    @Test
-    fun `import zip with catalog-prefixed files installs to that model id`() {
-        val zip = createZip(
-            "tiny.en-encoder.int8.onnx" to "enc",
-            "tiny.en-decoder.int8.onnx" to "dec",
-            "tiny.en-tokens.txt" to "tok"
+        val bad = zip(
+            "model.json" to manifestJson("nemo_ctc", "../escape.onnx", "tokens.txt", listOf("../escape.onnx", "tokens.txt")),
+            "tokens.txt" to "new tokens",
         )
-        val result = installImportZip(zip, modelsDir)
-        assertTrue("import should succeed", result is ModelDownloader.Result.Success)
-        assertEquals("tiny.en", (result as ModelDownloader.Result.Success).modelId)
-        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "tiny.en"))
-        assertFalse("part zip should be cleaned up", zip.exists())
-    }
+        val result = ModelDownloader.installImportZip(bad, models)
 
-    @Test
-    fun `import zip without catalog prefix installs to import slot`() {
-        val zip = createZip(
-            "my-model-encoder.int8.onnx" to "enc",
-            "my-model-decoder.int8.onnx" to "dec",
-            "my-model-tokens.txt" to "tok"
-        )
-        val result = installImportZip(zip, modelsDir)
-        assertTrue("import should succeed", result is ModelDownloader.Result.Success)
-        assertEquals(
-            ModelCatalog.IMPORT_ID,
-            (result as ModelDownloader.Result.Success).modelId
-        )
-        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, ModelCatalog.IMPORT_ID))
-    }
-
-    @Test
-    fun `import accepts non-int8 encoder and decoder names`() {
-        val zip = createZip(
-            "model-encoder.onnx" to "enc",
-            "model-decoder.onnx" to "dec",
-            "model-tokens.txt" to "tok"
-        )
-        val result = installImportZip(zip, modelsDir)
-        assertTrue("import should succeed", result is ModelDownloader.Result.Success)
-        assertEquals(ModelCatalog.IMPORT_ID, (result as ModelDownloader.Result.Success).modelId)
-        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, ModelCatalog.IMPORT_ID))
-    }
-
-    @Test
-    fun `incomplete zip fails and does not delete other model dirs`() {
-        writeCatalogInstall("tiny.en")
-
-        val zip = createZip("tiny.en-encoder.int8.onnx" to "only-encoder")
-        val result = installImportZip(zip, modelsDir)
-        assertTrue("incomplete zip should fail", result is ModelDownloader.Result.Error)
-
-        // The previously installed model is untouched.
-        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "tiny.en"))
-        assertEquals(
-            1.toByte(),
-            File(File(modelsDir, "tiny.en"), "tiny.en-encoder.int8.onnx").readBytes()[0]
-        )
-    }
-
-    @Test
-    fun `failed import keeps existing install of the same id intact`() {
-        writeCatalogInstall("base.en")
-        val zip = createZip("base.en-encoder.int8.onnx" to "only")
-        val result = installImportZip(zip, modelsDir)
         assertTrue(result is ModelDownloader.Result.Error)
-        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "base.en"))
+        assertEquals(old, File(models, ModelCatalog.IMPORT_ID).walkTopDown().filter { it.isFile }
+            .associate { it.relativeTo(File(models, ModelCatalog.IMPORT_ID)).invariantSeparatorsPath to it.readBytes().toList() })
     }
 
     @Test
-    fun `resolvePaths for import prefers int8 encoder over plain onnx`() {
-        val dir = File(modelsDir, ModelCatalog.IMPORT_ID).apply { mkdirs() }
-        File(dir, "model-encoder.onnx").writeBytes(byteArrayOf(1))
-        File(dir, "model-encoder.int8.onnx").writeBytes(byteArrayOf(2))
-        File(dir, "model-decoder.int8.onnx").writeBytes(byteArrayOf(1))
-        File(dir, "model-tokens.txt").writeBytes(byteArrayOf(1))
-        val paths = ModelDownloader.resolvePathsIn(modelsDir, ModelCatalog.IMPORT_ID)
-        assertNotNull(paths)
-        assertEquals("model-encoder.int8.onnx", paths!!.first.name)
-    }
-
-    // Legacy purge
-
-    @Test
-    fun `purgeLegacyInstall removes the legacy RTranslator folder`() {
-        val legacy = File(modelsDir, ModelCatalog.LEGACY_FOLDER).apply { mkdirs() }
-        File(legacy, "Whisper_encoder.onnx").writeBytes(byteArrayOf(1))
-        File(legacy, "Whisper_decoder.onnx").writeBytes(byteArrayOf(1))
-
-        ModelDownloader.purgeLegacyDir(modelsDir)
-        assertFalse("Legacy folder should be gone", legacy.exists())
+    fun `unsupported backend returns explicit error without activation`() {
+        val zip = zip("model.json" to """{"version":1,"title":"x","backend":"transducer"}""")
+        val result = ModelDownloader.installImportZip(zip, models)
+        assertTrue(result is ModelDownloader.Result.Error)
+        assertFalse(File(models, ModelCatalog.IMPORT_ID).exists())
     }
 
     @Test
-    fun `purgeLegacyInstall is a no-op when the folder is absent`() {
-        ModelDownloader.purgeLegacyDir(modelsDir)
-        assertTrue(modelsDir.exists())
-    }
-
-    // Safe install
-
-    @Test
-    fun `safeInstall replaces existing install only after verification`() {
-        val target = File(modelsDir, "base.en")
-        writeCatalogInstall("base.en")
-        File(target, "marker.txt").writeText("old")
-
-        val staging = tempFolder.newFolder("staging")
-        val names = ModelDownloader.requiredFileNames("base.en")
-        names.forEach { File(staging, it).writeBytes(byteArrayOf(2)) }
-
-        val result = ModelDownloader.safeInstall(staging, target, names)
-        assertTrue("safeInstall should succeed", result.isSuccess)
-        assertFalse("old marker should be gone", File(target, "marker.txt").exists())
-        assertEquals(2.toByte(), File(target, names[0]).readBytes()[0])
-    }
-
-    @Test
-    fun `safeInstall preserves old model when staging is incomplete`() {
-        val target = File(modelsDir, "base.en")
-        writeCatalogInstall("base.en")
-
-        val staging = tempFolder.newFolder("staging")
-        val names = ModelDownloader.requiredFileNames("base.en")
-        File(staging, names[0]).writeBytes(byteArrayOf(2))
-
-        val result = ModelDownloader.safeInstall(staging, target, names)
-        assertTrue("safeInstall should fail", result.isFailure)
-        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "base.en"))
-        assertEquals(1.toByte(), File(target, names[0]).readBytes()[0])
-    }
-
-    @Test
-    fun `safeInstall cleans staging dir on failure`() {
-        val target = File(modelsDir, "base.en")
-        writeCatalogInstall("base.en")
-
-        val staging = tempFolder.newFolder("staging")
-        val names = ModelDownloader.requiredFileNames("base.en")
-        File(staging, names[0]).writeBytes(byteArrayOf(2))
-
-        ModelDownloader.safeInstall(staging, target, names)
-        assertFalse("staging dir should be cleaned up", staging.exists())
-    }
-
-    @Test
-    fun `safeInstall fails gracefully on non-directory staging`() {
-        val target = File(modelsDir, "base.en")
-        writeCatalogInstall("base.en")
-
-        val badStaging = tempFolder.newFile("notadir")
-        val names = ModelDownloader.requiredFileNames("base.en")
-        val result = ModelDownloader.safeInstall(badStaging, target, names)
-        assertTrue("should fail gracefully", result.isFailure)
-        assertNotNull(ModelDownloader.resolvePathsIn(modelsDir, "base.en"))
-    }
-
-    // Helpers
-
-    private fun writeImportInstall(multilingualMetadata: Boolean) {
-        val dir = File(modelsDir, ModelCatalog.IMPORT_ID).apply { mkdirs() }
-        val names = ModelDownloader.requiredFileNames(ModelCatalog.IMPORT_ID)
-        File(dir, names[0]).writeBytes(
-            onnxWithMetadata("is_multilingual" to if (multilingualMetadata) "1" else "0")
+    fun `manifestless import accepts only unambiguous whisper and never guesses ctc`() {
+        val ambiguous = zip(
+            "a-encoder.onnx" to "enc1", "b-encoder.onnx" to "enc2",
+            "model-decoder.onnx" to "dec", "tokens.txt" to "tokens",
         )
-        File(dir, names[1]).writeBytes(byteArrayOf(1))
-        File(dir, names[2]).writeBytes(byteArrayOf(1))
+        assertTrue(ModelDownloader.installImportZip(ambiguous, models) is ModelDownloader.Result.Error)
+
+        val ctc = zip("model.int8.onnx" to "graph", "tokens.txt" to "tokens")
+        assertTrue(ModelDownloader.installImportZip(ctc, models) is ModelDownloader.Result.Error)
+        assertFalse(File(models, ModelCatalog.IMPORT_ID).exists())
     }
 
-    /**
-     * Emulates the metadata tail of an ONNX protobuf: repeated field 14
-     * {key, value} pairs, each a length-delimited string field.
-     */
-    private fun onnxWithMetadata(vararg entries: Pair<String, String>): ByteArray {
-        val out = ByteArrayOutputStream()
-        for ((key, value) in entries) {
-            val entry = ByteArrayOutputStream()
-            writeLengthDelimitedField(entry, 1, key)
-            writeLengthDelimitedField(entry, 2, value)
-            out.write(0x72)
-            writeVarint(out, entry.size())
-            out.write(entry.toByteArray())
-        }
-        return out.toByteArray()
+    @Test
+    fun `manifestless whisper migration derives only metadata-supported language policy`() {
+        val dir = File(models, ModelCatalog.IMPORT_ID).apply { mkdirs() }
+        File(dir, "nested/encoder.onnx").apply { parentFile?.mkdirs(); writeText("onnx") }
+        File(dir, "nested/decoder.onnx").writeText("decoder")
+        File(dir, "nested/tokens.txt").writeText("tokens")
+
+        val resolved = ModelDownloader.resolveModelIn(models, ModelCatalog.IMPORT_ID)
+
+        assertNotNull(resolved)
+        assertEquals(ModelLayout.Whisper("nested/encoder.onnx", "nested/decoder.onnx", "nested/tokens.txt"), resolved!!.spec.layout)
+        assertEquals(LanguagePolicy.Fixed("en", "English"), resolved.spec.languagePolicy)
     }
 
-    private fun writeLengthDelimitedField(
-        out: ByteArrayOutputStream,
-        fieldNumber: Int,
-        value: String,
-    ) {
-        out.write((fieldNumber shl 3) or 2)
-        val bytes = value.toByteArray(Charsets.UTF_8)
-        writeVarint(out, bytes.size)
-        out.write(bytes)
+    @Test
+    fun `replacement install generation changes`() {
+        fun packageZip(graph: String) = zip(
+            "model.json" to manifestJson("nemo_ctc", "model.onnx", "tokens.txt", listOf("model.onnx", "tokens.txt")),
+            "model.onnx" to graph,
+            "tokens.txt" to "tokens",
+        )
+        assertEquals(ModelDownloader.Result.Success(ModelCatalog.IMPORT_ID), ModelDownloader.installImportZip(packageZip("graph v1"), models))
+        val first = ModelDownloader.resolveModelIn(models, ModelCatalog.IMPORT_ID)!!.generation
+
+        assertEquals(ModelDownloader.Result.Success(ModelCatalog.IMPORT_ID), ModelDownloader.installImportZip(packageZip("graph v2"), models))
+        val second = ModelDownloader.resolveModelIn(models, ModelCatalog.IMPORT_ID)!!.generation
+
+        assertNotEquals(first, second)
     }
 
-    private fun writeVarint(out: ByteArrayOutputStream, value: Int) {
-        var v = value
-        while (true) {
-            if ((v and 0x7F.inv()) == 0) {
-                out.write(v)
-                return
-            }
-            out.write((v and 0x7F) or 0x80)
-            v = v ushr 7
-        }
-    }
+    private fun manifestJson(backend: String, model: String, tokens: String, artifacts: List<String>): String =
+        """{"version":1,"title":"Test package","backend":"$backend","files":{"model":"$model","tokens":"$tokens"},"artifacts":[${artifacts.joinToString(",") { "\"$it\"" }}],"language":{"mode":"fixed","code":"en","label":"English"}}"""
 
-    private fun createZip(vararg entries: Pair<String, String?>): File {
-        val zip = tempFolder.newFile("test.zip")
-        ZipOutputStream(FileOutputStream(zip)).use { zos ->
-            for ((name, content) in entries) {
-                zos.putNextEntry(ZipEntry(name))
-                if (content != null) {
-                    zos.write(content.toByteArray())
-                }
-                zos.closeEntry()
+    private fun zip(vararg entries: Pair<String, String>): File {
+        val file = temp.newFile("package-${System.nanoTime()}.zip")
+        ZipOutputStream(FileOutputStream(file)).use { output ->
+            entries.forEach { (name, content) ->
+                output.putNextEntry(ZipEntry(name))
+                output.write(content.toByteArray())
+                output.closeEntry()
             }
         }
-        return zip
+        return file
     }
 }

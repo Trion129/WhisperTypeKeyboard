@@ -12,15 +12,15 @@ the machine; only metrics and token counts are printed.
 ## Setup (pinned to the app's runtime)
 
 The sherpa-onnx Python package **must match** the app's JNI pin in
-`app/build.gradle.kts` (`com.github.k2-fsa:sherpa-onnx:v1.13.4`):
+`app/build.gradle.kts` (`com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1`):
 
 ```bash
 cd /tmp/whisper-check
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python \
-    "sherpa-onnx==1.13.4" "soundfile==0.14.0" "numpy==2.5.3" \
+    "sherpa-onnx==2.0.1" "soundfile==0.14.0" "numpy==2.5.3" \
     "faster-whisper==1.2.1" "datasets==5.0.1"
-../..../WhisperTypeKeyboard/bench/fetch_models.sh /tmp/whisper-check/models small tiny base.en
+../../WhisperTypeKeyboard/bench/fetch_models.sh /tmp/whisper-check/models small tiny base.en oriserve-swift parakeet-ctc-110m
 ```
 
 faster-whisper (full OpenAI decoder: beam search + temperature fallback) is
@@ -29,23 +29,55 @@ the **quality reference**, not an app dependency. It pulls
 
 ## Quick host check (real Kotlin pipeline, no emulator)
 
-Runs the app's actual `WavReader` + `SherpaWhisperEngine` + language
-resolution (`ModelCatalog.effectiveLanguage`) as a JUnit test on the host JVM,
-using sherpa-onnx's linux-x64 JNI build of the same version pinned in
-`app/build.gradle.kts`. No venv needed; scoring is stdlib `bench/score.py`.
+Runs the app's `WavReader`, `ModelCatalog` descriptor resolution and shared `AsrEngineFactory` on the host JVM using the same sherpa-onnx JNI version as the app. The host replay uses Whisper or NeMo CTC according to the descriptor; token-cap trace columns are emitted only for Whisper.
 
 ```bash
-bench/host_replay.sh tiny                              # English, bench/fixtures
+bench/host_replay.sh tiny                              # English Whisper
 bench/host_replay.sh small hi bench/fixtures
-bench/host_replay.sh base fr bench/fixtures/french
+bench/host_replay.sh oriserve-swift hi bench/fixtures
+bench/host_replay.sh parakeet-ctc-110m en bench/fixtures
+bench/host_replay.sh canary-180m-flash fr bench/fixtures/french
 ```
 
 The JNI libs and models are cached in `~/.cache/whispertype-host`
 (override with `WHISPERTYPE_HOST_CACHE`); the libs are symlinked into
-`app/src/test/jniLibs/` (gitignored). Rows land in
-`bench/results/host-*.jsonl` with PipelineReplayTest's schema plus
-`resolved_language`. Limits: x86_64 desktop timings are not phone timings,
-and the AudioRecord capture path is not exercised.
+`app/src/test/jniLibs/` (gitignored). JSONL rows include descriptor title/revision, requested and effective language, preprocessing/decode timings, and Whisper-only retry trace fields when applicable (`used_retry`, `padded_up_front`, `detected_language`, `split_decodes`; `score.py` shows them as `RETRY`, `PAD-UP`, `SPLIT`). Other adapters report no synthetic token-cap metrics. Host execution validates the selected runtime path, not Android packaging, phone latency, or memory.
+
+VAD path (the app's production segmenter):
+
+```bash
+WHISPERTYPE_HOST_VAD=1 bench/host_replay.sh small hi bench/fixtures
+WHISPERTYPE_HOST_VAD=1 WHISPERTYPE_HOST_VAD_FILE=hi_in_1766.wav bench/host_replay.sh small hi bench/fixtures
+```
+
+Rows include the segment count, each segment length, the speech length, and the
+joined transcript. The test asserts that at least one segment exists and that no
+segment exceeds the model's `maxSegmentMs`.
+
+For recordings longer than 60 seconds, concatenate fixture WAVs into
+`segmented-over-60s.wav` in a fixture directory, then run the same Kotlin
+adapter/segmenter path against each installed backend:
+
+```bash
+WHISPERTYPE_HOST_SEGMENTED=1 bench/host_replay.sh base en /tmp/long-fixture
+WHISPERTYPE_HOST_SEGMENTED=1 bench/host_replay.sh parakeet-ctc-110m en /tmp/long-fixture
+```
+
+The directory must contain `segmented-over-60s.wav`. Output reports each
+segment's sample boundaries, duration, transcript character count, and total
+transcript length. Whisper segments are held below its model window; the CTC
+segment size uses the catalog's conservative model-specific bound.
+
+Artifact fetching calls the app's descriptor-based installer helper: there is
+no second URL/file-name catalog in the shell scripts. The new Swift and Parakeet
+artifacts use pinned revisions, byte sizes, and SHA-256 verification.
+
+Scoring is opt-in via `WHISPERTYPE_REFS=/path/to/refs.tsv`. Use recordings and
+references appropriate to the selected model. In particular, **do not score
+Swift's Romanized output against Devanagari references**; that is a script
+mismatch, not an accuracy comparison. An unset reference path prints transcripts
+and timings only.
+
 
 ## Fixtures
 
@@ -59,6 +91,9 @@ FLEURS scripted studio clips (CC-BY) with written references in
 for that, record per `docs/quality/capture-protocol.md`.
 
 ## Desktop paired run
+The Python paired harness below is Whisper-specific. Use the Kotlin replay
+above for the adapter-based Swift and NeMo CTC paths.
+
 
 ```bash
 .venv/bin/python bench/harness.py \
@@ -72,7 +107,7 @@ Arms, all on the same audio and same model files:
 
 | arm | preprocessing | decoder | isolates |
 |---|---|---|---|
-| `app` | `WavReader` mirror (resample + peak norm) | sherpa 1.13.4 greedy + ~29.5 s pad retry | the installed app |
+| `app` | `WavReader` mirror (resample + peak norm) | sherpa 2.0.1 greedy + ~29.5 s pad retry | the installed app |
 | `raw` | resample only, **no peak norm** | same | what normalization does |
 | `app-nopad` | `app` without the pad retry | same | what the retry does |
 | `faster` | `app` samples | faster-whisper, beam 5 | the decoder-quality gap |
@@ -94,27 +129,28 @@ and vary one thing. Desktop timings say nothing about phone timings.
 
 ## Emulator/on-device replay (real Kotlin pipeline)
 
-`PipelineReplayTest` (androidTest) pushes the same fixtures through the
-build's real `WavReader` + `SherpaWhisperEngine`:
+`PipelineReplayTest` (androidTest) resolves the manifest's catalog model descriptor and dispatches through the same factory as dictation:
 
 ```bash
 adb push bench/fixtures /data/local/tmp/whispertype-bench/fixtures
-adb push /tmp/whisper-check/models/small /data/local/tmp/whispertype-bench/models/small
+adb push /tmp/whisper-check/models/oriserve-swift /data/local/tmp/whispertype-bench/models/oriserve-swift
 cat > /tmp/whisper-check/manifest.json <<'EOF'
-{"model_id":"small","language":"","fixtures_dir":"/data/local/tmp/whispertype-bench/fixtures","model_dir":"/data/local/tmp/whispertype-bench/models/small"}
+{"model_id":"oriserve-swift","language":"hi","fixtures_dir":"/data/local/tmp/whispertype-bench/fixtures","model_dir":"/data/local/tmp/whispertype-bench/models/oriserve-swift"}
 EOF
 adb push /tmp/whisper-check/manifest.json /data/local/tmp/whispertype-bench/manifest.json
 adb shell chmod -R a+rX /data/local/tmp/whispertype-bench
-./gradlew connectedDebugAndroidTest \
+JAVA_TOOL_OPTIONS="-Djava.net.preferIPv4Stack=true" ./gradlew --no-daemon connectedDebugAndroidTest \
     -Pandroid.testInstrumentationRunnerArguments.class=me.trion.whispertype.voice.PipelineReplayTest
-adb shell run-as me.trion.whispertype cat files/bench-out/results.jsonl > bench/results/emulator-small.jsonl
+adb shell run-as me.trion.whispertype cat files/bench-out/results.jsonl > bench/results/device-oriserve-swift.jsonl
 ```
 
-Compare `results.jsonl` rows against the desktop `app` arm per file:
-transcripts, `first_pass_tokens` vs `token_cap`, and `hit_token_cap`
-should match; timings depend on the host and are not comparable.
-Emulator x86_64 is a stand-in for the *pipeline*, not for phone CPU
-performance — Phase 2's resource gate still needs the target phone.
+Fetch paths are the descriptor's declared artifact paths: Whisper files retain their canonical names; Swift artifacts live under `hi-hinglish-swift/`; Parakeet CTC uses `model.int8.onnx` plus `tokens.txt`. Imported ZIP manifests are data-only (`version=1`, backend/layout roles, relative artifacts, and language policy), validated by the installer; packages do not select executable adapters.
+
+Whisper rows include optional token-cap trace fields; CTC rows omit them.
+`empty_tokens` counts tokens the runtime returned as empty strings — sherpa-onnx
+1.13.x dropped Whisper byte-fallback tokens this way, deleting most Devanagari,
+CJK and Arabic characters. `score.py` flags any non-zero row as `BYTE-LOSS`; the
+app is pinned to 2.0.1, where the count is 0. Compare transcript and common timing fields for matching fixtures. Emulator timings are not phone timings; the ARM64 resource gate still requires a target device.
 
 ## whisper.cpp candidate arm (Phase 2 prep)
 

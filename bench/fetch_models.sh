@@ -1,22 +1,18 @@
 #!/usr/bin/env bash
-# Downloads the exact sherpa-onnx Whisper files the app downloads
-# (ModelSpec.baseUrl in ModelCatalog.kt) for the given model ids.
-#
-# Usage: ./bench/fetch_models.sh [dest] [model ids...]
-#   ./bench/fetch_models.sh /tmp/whisper-check/models small base.en
+# Fetch artifacts through the app's real Kotlin catalog and downloader.
+# Usage: bash bench/fetch_models.sh [dest] [model ids...]
 set -euo pipefail
-
-DEST="${1:-/tmp/whisper-check/models}"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+DEST=${1:-/tmp/whisper-check/models}
 shift || true
 IDS=("$@")
 [ ${#IDS[@]} -eq 0 ] && IDS=(small)
-
+mkdir -p "$DEST"
+DEST=$(realpath "$DEST")
 for id in "${IDS[@]}"; do
-  mkdir -p "$DEST/$id"
-  for f in "$id-encoder.int8.onnx" "$id-decoder.int8.onnx" "$id-tokens.txt"; do
-    curl -fL --retry 3 -o "$DEST/$id/$f" \
-      "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-$id/resolve/main/$f" &
-  done
+  WHISPERTYPE_FETCH_ARTIFACTS=1 WHISPERTYPE_FETCH_ONLY=1 \
+    JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Djava.net.preferIPv4Stack=true" \
+    ./gradlew :app:testDebugUnitTest --no-daemon --rerun -q \
+      --tests 'me.trion.whispertype.voice.HostPipelineReplayTest' \
+      "-Pwhispertype.host.model=$id" "-Pwhispertype.host.modelDir=$DEST/$id"
 done
-wait
-ls -la "$DEST"/*/

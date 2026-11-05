@@ -28,9 +28,7 @@ if [[ ! -f "$JNI_LIB/libsherpa-onnx-jni.so" ]]; then
         | tar -xj -C "$CACHE"
 fi
 
-if [[ ! -f "$CACHE/models/$MODEL/$MODEL-encoder.int8.onnx" ]]; then
-    bench/fetch_models.sh "$CACHE/models" "$MODEL"
-fi
+mkdir -p "$CACHE/models/$MODEL"
 
 mkdir -p app/src/test/jniLibs
 ln -sf "$JNI_LIB/libsherpa-onnx-jni.so" app/src/test/jniLibs/
@@ -40,7 +38,33 @@ FIXTURES_ABS=$(cd "$FIXTURES" && pwd)
 mkdir -p bench/results
 OUT="$ROOT/bench/results/host-${MODEL}-${LANG_ARG:-auto}-$(date +%Y%m%d-%H%M%S).jsonl"
 
-./gradlew :app:testDebugUnitTest \
+if [[ "${WHISPERTYPE_HOST_VAD:-0}" == "1" ]]; then
+    JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Djava.net.preferIPv4Stack=true" ./gradlew --no-daemon :app:testDebugUnitTest \
+        --tests 'me.trion.whispertype.voice.VadHostPipelineReplayTest' --rerun -q \
+        "-Pwhispertype.host.model=$MODEL" \
+        "-Pwhispertype.host.modelDir=$CACHE/models/$MODEL" \
+        "-Pwhispertype.host.language=$LANG_ARG" \
+        "-Pwhispertype.host.fixtures=$FIXTURES_ABS" \
+        "-Pwhispertype.host.out=$OUT"
+    echo "results: $OUT"
+    exit 0
+fi
+
+if [[ "${WHISPERTYPE_HOST_SEGMENTED:-0}" == "1" ]]; then
+    [[ -f "$FIXTURES_ABS/segmented-over-60s.wav" ]] || {
+        echo "segmented replay expects $FIXTURES_ABS/segmented-over-60s.wav" >&2
+        exit 1
+    }
+    JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Djava.net.preferIPv4Stack=true" ./gradlew --no-daemon :app:testDebugUnitTest \
+        --tests 'me.trion.whispertype.voice.SegmentedHostPipelineReplayTest' --rerun -q \
+        "-Pwhispertype.host.model=$MODEL" \
+        "-Pwhispertype.host.modelDir=$CACHE/models/$MODEL" \
+        "-Pwhispertype.host.language=$LANG_ARG" \
+        "-Pwhispertype.host.fixtures=$FIXTURES_ABS"
+    exit 0
+fi
+
+WHISPERTYPE_FETCH_ARTIFACTS=1 JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Djava.net.preferIPv4Stack=true" ./gradlew --no-daemon :app:testDebugUnitTest \
     --tests 'me.trion.whispertype.voice.HostPipelineReplayTest' --rerun -q \
     "-Pwhispertype.host.model=$MODEL" \
     "-Pwhispertype.host.modelDir=$CACHE/models/$MODEL" \
@@ -48,9 +72,18 @@ OUT="$ROOT/bench/results/host-${MODEL}-${LANG_ARG:-auto}-$(date +%Y%m%d-%H%M%S).
     "-Pwhispertype.host.fixtures=$FIXTURES_ABS" \
     "-Pwhispertype.host.out=$OUT"
 
-if [[ -f "$FIXTURES_ABS/refs.tsv" ]]; then
-    python3 bench/score.py "$OUT" --refs "$FIXTURES_ABS/refs.tsv"
+if [[ -n "${WHISPERTYPE_REFS:-}" ]]; then
+    python3 bench/score.py "$OUT" --refs "$WHISPERTYPE_REFS"
 else
     python3 bench/score.py "$OUT"
 fi
+python3 - "$OUT" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+padded = sum(1 for r in rows if r.get("padded_up_front"))
+retried = sum(1 for r in rows if r.get("used_retry"))
+langs = sorted({r["detected_language"] for r in rows if r.get("detected_language")})
+print(f"trace: padded-up-front {padded}/{len(rows)}  retried {retried}  "
+      f"detected {','.join(langs) or '-'}")
+PY
 echo "results: $OUT"

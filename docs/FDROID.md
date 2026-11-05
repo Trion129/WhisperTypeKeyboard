@@ -19,7 +19,7 @@ This guide prepares and submits **me.trion.whispertype** to the main F-Droid rep
 
 1. **Native libraries**  
    Speech recognition uses **sherpa-onnx** from JitPack:
-   `com.github.k2-fsa:sherpa-onnx:v1.13.4`. That artifact bundles the ONNX
+   `com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1`. That artifact bundles the ONNX
    Runtime native libraries for all supported ABIs, so this repo does **not**
    commit `jniLibs` and does **not** use a `fdroid-fetch-jni` prebuild or any
    other downloaded-JNI build step. JitPack is on the F-Droid trusted Maven

@@ -11,14 +11,21 @@ import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
  * System.loadLibrary("sherpa-onnx-jni") happens in the OfflineRecognizer
  * companion, so no explicit load is needed here.
  */
-class SherpaWhisperEngine(
-    encoderPath: String,
-    decoderPath: String,
-    tokensPath: String,
-    numThreads: Int = 2,
-    language: String = ModelCatalog.ENGLISH_LANGUAGE,
-) {
-    private val recognizer: OfflineRecognizer
+class SherpaWhisperEngine internal constructor(
+    private val language: String,
+    private val backend: DecodeBackend,
+) : AsrEngine {
+
+    constructor(
+        encoderPath: String,
+        decoderPath: String,
+        tokensPath: String,
+        numThreads: Int = 2,
+        language: String = ModelCatalog.ENGLISH_LANGUAGE,
+    ) : this(
+        language,
+        SherpaBackend(encoderPath, decoderPath, tokensPath, numThreads, language),
+    )
 
     /** What one [transcribe] call did, in decoder terms. Contains no text. */
     data class Trace(
@@ -27,8 +34,21 @@ class SherpaWhisperEngine(
         val firstPassTokens: Int,
         val tokenCap: Int,
         val hitTokenCap: Boolean,
+        val usedRetry: Boolean,
+        val paddedUpFront: Boolean,
+        /** Language the decoder reported for the chosen text, "" when unknown. */
+        val detectedLanguage: String,
         val firstDecodeMs: Long,
         val retryDecodeMs: Long,
+        /**
+         * Tokens the runtime returned as empty strings. sherpa-onnx 1.13.x
+         * dropped Whisper byte-fallback tokens this way, which silently
+         * deleted every character outside the standalone-token set (most of
+         * Devanagari, CJK, Arabic). Must stay 0; see the v2.0.1 runtime.
+         */
+        val emptyTokenCount: Int = 0,
+        /** Extra padded decodes spent on halves after a decode filled the window cap. */
+        val splitDecodes: Int = 0,
     )
 
     /**
@@ -37,23 +57,18 @@ class SherpaWhisperEngine(
      */
     var onTrace: ((Trace) -> Unit)? = null
 
-    init {
-        val config = OfflineRecognizerConfig(
-            modelConfig = OfflineModelConfig(
-                whisper = OfflineWhisperModelConfig(
-                    encoder = encoderPath,
-                    decoder = decoderPath,
-                    language = language,
-                    task = "transcribe",
-                ),
-                tokens = tokensPath,
-                numThreads = numThreads,
-                provider = "cpu",
-                modelType = "whisper",
-            ),
-            decodingMethod = "greedy_search",
-        )
-        recognizer = OfflineRecognizer(assetManager = null, config = config)
+    private val denseHint = isDenseLanguage(language)
+    private val autoDetect = language.isEmpty()
+
+    /** Set once an auto-detect decode in this recording reported a dense script. */
+    private var detectedDense = false
+
+    /**
+     * Starts a new recording. Clears the detection memo so the next part
+     * decodes at its real length again; the configured language still applies.
+     */
+    fun onRecordingStart() {
+        detectedDense = false
     }
 
     /**
@@ -61,63 +76,141 @@ class SherpaWhisperEngine(
      *
      * sherpa-onnx stops the Whisper decoder once it has produced six tokens
      * per second of audio, which cuts off scripts that need more than that
-     * (Devanagari, Tamil, Chinese, ...) mid-sentence. When the decode
-     * provably hit that cap, re-run the same audio padded to sherpa's maximum
-     * input (~29.5 s), where the cap is large enough for those scripts. The
-     * retry wins only when it produced more tokens: an untruncated decode is
-     * always longer than a capped one, while a shorter retry means padding
-     * made the model stop early. English and other low-token scripts never
-     * hit the cap, so they keep the faster single-pass path.
+     * (Devanagari, Tamil, Chinese, ...). When the decode provably hit that
+     * cap, re-run the same audio padded to sherpa's maximum input (~29.5 s),
+     * where the cap is large enough for those scripts. The retry wins only
+     * when it produced more tokens: an untruncated decode is always longer
+     * than a capped one, while a shorter retry means padding made the model
+     * stop early. English and other low-token scripts never hit the cap, so
+     * they keep the faster single-pass path.
+     *
+     * For a known dense language, and for later parts of an auto-detect
+     * recording that detected one, the part is padded up front instead and
+     * decoded once, which avoids the wasted real-length pass.
      */
-    fun transcribe(samples: FloatArray, sampleRate: Int = 16000): String {
+    override fun transcribe(samples: FloatArray, sampleRate: Int): String {
+        val padUpFront = denseHint || detectedDense
+        val input = if (padUpFront) padToWhisperWindow(samples, sampleRate) else samples
         val firstStart = System.nanoTime()
-        val first = decode(samples, sampleRate)
+        val first = backend.decode(input, sampleRate)
         val firstDecodeMs = (System.nanoTime() - firstStart) / 1_000_000L
-        val retry = shouldRetryInFullWindow(first, samples.size, sampleRate)
+        observeLanguage(first)
         var retryDecodeMs = 0L
-        val text = if (retry) {
+        val retry = !padUpFront && shouldRetryInFullWindow(first, samples.size, sampleRate)
+        val chosen = if (retry) {
             val retryStart = System.nanoTime()
-            val retried = decode(padToWhisperWindow(samples, sampleRate), sampleRate)
+            val retried = backend.decode(padToWhisperWindow(samples, sampleRate), sampleRate)
             retryDecodeMs = (System.nanoTime() - retryStart) / 1_000_000L
-            preferLonger(first, retried).text
+            observeLanguage(retried)
+            preferLonger(first, retried)
         } else {
-            first.text
+            first
+        }
+        val chosenPadded = padUpFront || (retry && chosen !== first)
+        splitDecodes = 0
+        val text = if (chosenPadded && filledWindow(chosen, samples.size, sampleRate)) {
+            decodeSplit(samples, sampleRate, depth = 1)
+        } else {
+            chosen.text.trim()
         }
         onTrace?.invoke(
             Trace(
                 sampleCount = samples.size,
                 sampleRate = sampleRate,
                 firstPassTokens = first.tokens.size,
-                tokenCap = decoderTokenCap(samples.size, sampleRate),
+                tokenCap = decoderTokenCap(input.size, sampleRate),
                 hitTokenCap = retry,
+                usedRetry = retry,
+                paddedUpFront = padUpFront,
+                detectedLanguage = chosen.lang,
                 firstDecodeMs = firstDecodeMs,
                 retryDecodeMs = retryDecodeMs,
+                emptyTokenCount = emptyTokenCount(chosen),
+                splitDecodes = splitDecodes,
             )
         )
-        return correctText(text)
+        return text
     }
 
-    private fun decode(samples: FloatArray, sampleRate: Int): OfflineRecognizerResult {
-        val stream = recognizer.createStream()
-        try {
-            stream.acceptWaveform(samples, sampleRate)
-            recognizer.decode(stream)
-            return recognizer.getResult(stream)
-        } finally {
-            stream.release()
+    private var splitDecodes = 0
+
+    /**
+     * Even the padded window allows only 176 tokens, which a long part of
+     * fast Devanagari speech can fill. Cuts the part at its quietest point
+     * near the middle and decodes each half in its own padded window.
+     */
+    private fun decodeSplit(samples: FloatArray, sampleRate: Int, depth: Int): String {
+        val cut = quietestCut(samples, sampleRate)
+        return joinTranscriptSegments(
+            listOf(
+                decodeHalf(samples.copyOfRange(0, cut), sampleRate, depth),
+                decodeHalf(samples.copyOfRange(cut, samples.size), sampleRate, depth),
+            )
+        )
+    }
+
+    private fun decodeHalf(samples: FloatArray, sampleRate: Int, depth: Int): String {
+        val result = backend.decode(padToWhisperWindow(samples, sampleRate), sampleRate)
+        splitDecodes++
+        observeLanguage(result)
+        return if (depth < MAX_SPLIT_DEPTH && filledWindow(result, samples.size, sampleRate)) {
+            decodeSplit(samples, sampleRate, depth + 1)
+        } else {
+            result.text.trim()
         }
     }
 
-    fun release() {
-        recognizer.release()
+    /** Remembers a dense detection from either decode of an auto recording. */
+    private fun observeLanguage(result: OfflineRecognizerResult) {
+        if (autoDetect && isDenseLanguage(result.lang)) detectedDense = true
     }
 
-    private fun correctText(text: String): String {
-        var t = text.trim()
-        if (t.length >= 2 && t[0].isLowerCase()) {
-            t = t.replaceFirstChar { it.uppercaseChar() }
+    override fun release() = backend.release()
+
+    /** Decoder seam so padding and retry decisions run without the JNI. */
+    internal interface DecodeBackend {
+        fun decode(samples: FloatArray, sampleRate: Int): OfflineRecognizerResult
+        fun release()
+    }
+
+    private class SherpaBackend(
+        encoderPath: String,
+        decoderPath: String,
+        tokensPath: String,
+        numThreads: Int,
+        language: String,
+    ) : DecodeBackend {
+        private val recognizer = OfflineRecognizer(
+            assetManager = null,
+            config = OfflineRecognizerConfig(
+                modelConfig = OfflineModelConfig(
+                    whisper = OfflineWhisperModelConfig(
+                        encoder = encoderPath,
+                        decoder = decoderPath,
+                        language = language,
+                        task = "transcribe",
+                    ),
+                    tokens = tokensPath,
+                    numThreads = numThreads,
+                    provider = "cpu",
+                    modelType = "whisper",
+                ),
+                decodingMethod = "greedy_search",
+            ),
+        )
+
+        override fun decode(samples: FloatArray, sampleRate: Int): OfflineRecognizerResult {
+            val stream = recognizer.createStream()
+            try {
+                stream.acceptWaveform(samples, sampleRate)
+                recognizer.decode(stream)
+                return recognizer.getResult(stream)
+            } finally {
+                stream.release()
+            }
         }
-        return t
+
+        override fun release() = recognizer.release()
     }
 
     companion object {
@@ -165,6 +258,15 @@ class SherpaWhisperEngine(
         }
 
         /**
+         * Counts tokens the runtime could not convert to text. Non-zero means
+         * the byte-fallback path is broken and the transcript is missing
+         * characters; the whisper.cpp/Whisper BPE vocabularies store most
+         * non-Latin characters as several raw-byte tokens.
+         */
+        internal fun emptyTokenCount(result: OfflineRecognizerResult): Int =
+            result.tokens.count { it.isEmpty() }
+
+        /**
          * Picks the padded [retried] result only when it decoded more tokens
          * than the capped [first] pass; otherwise the longer first pass stays.
          */
@@ -173,6 +275,50 @@ class SherpaWhisperEngine(
             retried: OfflineRecognizerResult,
         ): OfflineRecognizerResult =
             if (retried.tokens.size > first.tokens.size) retried else first
+
+        /** Two split levels: at most 1 + 2 + 4 decodes for one part. */
+        private const val MAX_SPLIT_DEPTH = 2
+        private const val MIN_SPLIT_SECONDS = 4
+        private const val LOOP_WINDOW = 24
+        private const val LOOP_MAX_DISTINCT = 4
+
+        /**
+         * True when a padded decode used the whole window budget on real
+         * speech. A repetition loop (wrong forced language) also fills the
+         * budget, but splitting it only multiplies the loop, so it is kept.
+         */
+        internal fun filledWindow(
+            result: OfflineRecognizerResult,
+            sampleCount: Int,
+            sampleRate: Int,
+        ): Boolean =
+            sampleCount >= MIN_SPLIT_SECONDS * sampleRate &&
+                result.tokens.size >= decoderTokenCap(whisperWindowSamples(sampleRate), sampleRate) &&
+                !endsInLoop(result.tokens)
+
+        internal fun endsInLoop(tokens: Array<String>): Boolean =
+            tokens.size >= LOOP_WINDOW &&
+                tokens.takeLast(LOOP_WINDOW).distinct().size <= LOOP_MAX_DISTINCT
+
+        /** Start of the quietest 100 ms window in the middle third of [samples]. */
+        internal fun quietestCut(samples: FloatArray, sampleRate: Int): Int {
+            val window = sampleRate / 10
+            val start = samples.size / 3
+            val end = samples.size * 2 / 3
+            var best = samples.size / 2
+            var bestEnergy = Double.MAX_VALUE
+            var i = start
+            while (i + window <= end) {
+                var energy = 0.0
+                for (j in i until i + window) energy += samples[j] * samples[j]
+                if (energy < bestEnergy) {
+                    bestEnergy = energy
+                    best = i + window / 2
+                }
+                i += window
+            }
+            return best
+        }
 
         /** Extends [samples] with trailing silence up to [whisperWindowSamples]. */
         internal fun padToWhisperWindow(samples: FloatArray, sampleRate: Int): FloatArray {
