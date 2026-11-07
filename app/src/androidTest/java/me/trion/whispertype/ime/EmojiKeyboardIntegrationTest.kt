@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -41,7 +42,27 @@ class EmojiKeyboardIntegrationTest {
             field.setText("")
             assertTrue("SetupActivity test field could not receive focus", field.requestFocus())
             field.setSelection(field.text.length)
+        }
 
+        // `ime set` returns before the new IME is bound; a show request sent
+        // before then is dropped, so repeat it until the keyboard appears.
+        val deadline = SystemClock.uptimeMillis() + IME_TIMEOUT_MS
+        while (!device.hasObject(By.res(APP_PACKAGE, "keyboard_root"))) {
+            if (SystemClock.uptimeMillis() >= deadline) {
+                throw AssertionError(
+                    "WhisperType IME did not appear after resetting, enabling, selecting, " +
+                        "and focusing the test field after ${IME_TIMEOUT_MS}ms",
+                )
+            }
+            requestKeyboard()
+            device.wait(Until.hasObject(By.res(APP_PACKAGE, "keyboard_root")), SHOW_RETRY_MS)
+        }
+        assertFieldText("", "The SetupActivity test field was not empty at test start")
+    }
+
+    private fun requestKeyboard() {
+        activityRule.scenario.onActivity { activity ->
+            val field = activity.findViewById<EditText>(R.id.test_input)
             val inputMethodManager =
                 activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             inputMethodManager.restartInput(field)
@@ -49,13 +70,6 @@ class EmojiKeyboardIntegrationTest {
                 inputMethodManager.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
             }
         }
-
-        waitForObject(
-            By.res(APP_PACKAGE, "keyboard_root"),
-            IME_TIMEOUT_MS,
-            "WhisperType IME did not appear after resetting, enabling, selecting, and focusing the test field",
-        )
-        assertFieldText("", "The SetupActivity test field was not empty at test start")
     }
 
     @Test
@@ -110,7 +124,7 @@ class EmojiKeyboardIntegrationTest {
     fun normalSuggestionReplacesTriggerWord() {
         typeNormalKeys("haha")
 
-        val primarySuggestion = waitForObject(
+        waitForObject(
             By.text("😂"),
             SUGGESTION_TIMEOUT_MS,
             "Typing 'haha' did not show the 😂 emoji suggestion",
@@ -120,7 +134,11 @@ class EmojiKeyboardIntegrationTest {
             SUGGESTION_TIMEOUT_MS,
             "Typing 'haha' showed no alternate 🤣 emoji suggestion",
         )
-        primarySuggestion.click()
+        clickText(
+            text = "😂",
+            timeoutMs = SUGGESTION_TIMEOUT_MS,
+            failureContext = "The 😂 suggestion disappeared before it could be selected",
+        )
 
         awaitFieldText(
             expected = "😂",
@@ -190,11 +208,11 @@ class EmojiKeyboardIntegrationTest {
         timeoutMs: Long = UI_TIMEOUT_MS,
         failureContext: String,
     ) {
-        waitForObject(
+        clickObject(
             By.res(APP_PACKAGE, resourceName),
             timeoutMs,
             "$failureContext (missing resource '$resourceName')",
-        ).click()
+        )
     }
 
     private fun assertRedHeartFilterResults() {
@@ -218,19 +236,37 @@ class EmojiKeyboardIntegrationTest {
         timeoutMs: Long = UI_TIMEOUT_MS,
         failureContext: String,
     ) {
-        waitForObject(
+        clickObject(
             By.desc(description),
             timeoutMs,
             "$failureContext (missing content description '$description')",
-        ).click()
+        )
     }
 
     private fun clickText(text: String, timeoutMs: Long, failureContext: String) {
-        waitForObject(
+        clickObject(
             By.text(text),
             timeoutMs,
             "$failureContext (missing visible text '$text')",
-        ).click()
+        )
+    }
+
+    /**
+     * The keyboard rebuilds rows (for example the suggestion strip after a
+     * key press), so a found view can be replaced before the click lands.
+     * Finds it again and retries until the timeout.
+     */
+    private fun clickObject(selector: BySelector, timeoutMs: Long, failureMessage: String) {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (true) {
+            val remaining = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(POLL_INTERVAL_MS)
+            try {
+                waitForObject(selector, remaining, failureMessage).click()
+                return
+            } catch (e: StaleObjectException) {
+                if (SystemClock.uptimeMillis() >= deadline) throw e
+            }
+        }
     }
 
     private fun waitForObject(
@@ -351,5 +387,6 @@ class EmojiKeyboardIntegrationTest {
         const val UI_TIMEOUT_MS = 5_000L
         const val SUGGESTION_TIMEOUT_MS = 2_000L
         const val IME_TIMEOUT_MS = 10_000L
+        const val SHOW_RETRY_MS = 2_000L
     }
 }

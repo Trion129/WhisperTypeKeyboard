@@ -36,15 +36,19 @@ class SetupActivity : AppCompatActivity() {
         setContentView(R.layout.activity_setup)
 
         val root = findViewById<android.widget.ScrollView>(R.id.setup_scroll)
+        val testField = findViewById<EditText>(R.id.test_input)
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             // bottom pad for IME; if opt-out works status bar is fine, still apply system top if needed
-            v.updatePadding(bottom = ime.bottom.coerceAtLeast(sys.bottom))
+            val bottom = ime.bottom.coerceAtLeast(sys.bottom)
+            val grew = bottom > v.paddingBottom
+            v.updatePadding(bottom = bottom)
+            // The keyboard can finish showing after the field took focus; keep the field visible.
+            if (grew && testField.hasFocus()) root.post { root.smoothScrollTo(0, testField.bottom) }
             insets
         }
 
-        val testField = findViewById<EditText>(R.id.test_input)
         testField.setOnFocusChangeListener { v, hasFocus ->
             if (hasFocus) {
                 root.post {
