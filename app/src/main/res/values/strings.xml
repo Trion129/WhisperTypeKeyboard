@@ -25,6 +25,8 @@
     <string name="pref_incognito">Incognito (no learning or clipboard capture)</string>
     <string name="pref_double_space">Double-space period</string>
     <string name="pref_sentence_caps">Auto-capitalize sentences</string>
+    <string name="pref_enter_new_line">Enter key adds a new line</string>
+    <string name="pref_dictation_match_case">No capital letter when dictation continues a sentence</string>
     <string name="status_listening">Listening…</string>
     <string name="status_listening_elapsed">Listening · %1$ds</string>
     <string name="status_transcribing">Transcribing on-device…</string>

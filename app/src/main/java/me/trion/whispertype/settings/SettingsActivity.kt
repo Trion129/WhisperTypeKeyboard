@@ -114,6 +114,14 @@ class SettingsActivity : AppCompatActivity() {
             isChecked = prefs.sentenceCaps
             setOnCheckedChangeListener { _, checked -> prefs.sentenceCaps = checked }
         }
+        findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switch_enter_new_line).apply {
+            isChecked = prefs.enterNewLine
+            setOnCheckedChangeListener { _, checked -> prefs.enterNewLine = checked }
+        }
+        findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switch_dictation_match_case).apply {
+            isChecked = prefs.dictationMatchCase
+            setOnCheckedChangeListener { _, checked -> prefs.dictationMatchCase = checked }
+        }
 
 
         btnDownload.setOnClickListener { startDownload() }

@@ -1,6 +1,11 @@
 package me.trion.whispertype.ime
 
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
+
 enum class FieldVariation { NORMAL, URI, EMAIL, PASSWORD, NUMBER }
+
+enum class EnterAction { EDITOR_ACTION, NEW_LINE, KEY_EVENT }
 
 object TypingRules {
     fun shouldAutoPeriod(textBeforeCursor: String, variation: FieldVariation): Boolean {
@@ -15,6 +20,34 @@ object TypingRules {
         val trimmed = textBeforeCursor.trimEnd()
         if (trimmed.isEmpty()) return true
         return trimmed.last() in ".?!"
+    }
+
+    /**
+     * Whisper starts every transcript with a capital letter. When dictation
+     * resumes mid-sentence, lowercase that first word again. Words that look
+     * deliberate ("I", "I'm", "OK", "iPhone") stay as they are.
+     */
+    fun matchDictationCase(transcript: String, textBeforeCursor: String, variation: FieldVariation): String {
+        if (variation != FieldVariation.NORMAL) return transcript
+        if (textBeforeCursor.trimEnd(' ', '\t').endsWith('\n')) return transcript
+        if (shouldSentenceCap(textBeforeCursor, variation)) return transcript
+        val firstWord = transcript.takeWhile { !it.isWhitespace() }
+        if (firstWord.length < 2 || !firstWord[0].isUpperCase()) return transcript
+        if (firstWord.drop(1).any { it.isUpperCase() }) return transcript
+        if (firstWord[0] == 'I' && !firstWord[1].isLetter()) return transcript
+        return transcript.replaceFirstChar { it.lowercaseChar() }
+    }
+
+    fun enterAction(imeOptions: Int, inputType: Int, preferNewLine: Boolean): EnterAction {
+        val multiLine = inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0
+        if (preferNewLine && multiLine) return EnterAction.NEW_LINE
+        val action = imeOptions and EditorInfo.IME_MASK_ACTION
+        if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED &&
+            imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION == 0
+        ) {
+            return EnterAction.EDITOR_ACTION
+        }
+        return EnterAction.KEY_EVENT
     }
 
     fun previousWordLength(textBeforeCursor: String): Int {

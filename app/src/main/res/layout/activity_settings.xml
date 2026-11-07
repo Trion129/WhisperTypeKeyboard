@@ -177,5 +177,21 @@
             android:paddingVertical="8dp"
             android:text="@string/pref_sentence_caps"
             android:textColor="@color/on_surface" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switch_enter_new_line"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="@string/pref_enter_new_line"
+            android:textColor="@color/on_surface" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switch_dictation_match_case"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="@string/pref_dictation_match_case"
+            android:textColor="@color/on_surface" />
     </LinearLayout>
 </ScrollView>

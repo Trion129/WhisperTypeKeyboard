@@ -1,5 +1,7 @@
 package me.trion.whispertype.ime
 
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -36,6 +38,52 @@ class TypingRulesTest {
         assertTrue(TypingRules.shouldSentenceCap("Wow!", FieldVariation.NORMAL))
         assertFalse(TypingRules.shouldSentenceCap("Hi", FieldVariation.NORMAL))
         assertFalse(TypingRules.shouldSentenceCap("Hi.", FieldVariation.PASSWORD))
+    }
+
+    @Test
+    fun `dictation mid sentence lowercases the first word`() {
+        val n = FieldVariation.NORMAL
+        assertEquals("then we left", TypingRules.matchDictationCase("Then we left", "I went home ", n))
+        assertEquals("then we left", TypingRules.matchDictationCase("Then we left", "I went home,", n))
+        assertEquals("über alles", TypingRules.matchDictationCase("Über alles", "Deutschland ", n))
+    }
+
+    @Test
+    fun `dictation keeps capital at sentence start`() {
+        val n = FieldVariation.NORMAL
+        assertEquals("Then we left", TypingRules.matchDictationCase("Then we left", "", n))
+        assertEquals("Then we left", TypingRules.matchDictationCase("Then we left", "Done. ", n))
+        assertEquals("Then we left", TypingRules.matchDictationCase("Then we left", "Done?", n))
+        assertEquals("Then we left", TypingRules.matchDictationCase("Then we left", "list\n", n))
+        assertEquals("Then we left", TypingRules.matchDictationCase("Then we left", "list\n ", n))
+    }
+
+    @Test
+    fun `dictation keeps deliberate capitals`() {
+        val n = FieldVariation.NORMAL
+        assertEquals("I think so", TypingRules.matchDictationCase("I think so", "and ", n))
+        assertEquals("I'm here", TypingRules.matchDictationCase("I'm here", "and ", n))
+        assertEquals("OK then", TypingRules.matchDictationCase("OK then", "and ", n))
+        assertEquals("McDonald's", TypingRules.matchDictationCase("McDonald's", "at ", n))
+        assertEquals("In time", TypingRules.matchDictationCase("In time", "x", FieldVariation.EMAIL))
+        assertEquals("in time", TypingRules.matchDictationCase("In time", "just ", n))
+        assertEquals("नमस्ते", TypingRules.matchDictationCase("नमस्ते", "और ", n))
+    }
+
+    @Test
+    fun `enter sends by default and adds a new line when preferred`() {
+        val send = EditorInfo.IME_ACTION_SEND
+        val multi = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        val single = InputType.TYPE_CLASS_TEXT
+        assertEquals(EnterAction.EDITOR_ACTION, TypingRules.enterAction(send, multi, false))
+        assertEquals(EnterAction.NEW_LINE, TypingRules.enterAction(send, multi, true))
+        // Single-line fields (search, URL) cannot hold a new line, so keep the action.
+        assertEquals(EnterAction.EDITOR_ACTION, TypingRules.enterAction(send, single, true))
+        assertEquals(
+            EnterAction.KEY_EVENT,
+            TypingRules.enterAction(send or EditorInfo.IME_FLAG_NO_ENTER_ACTION, multi, false),
+        )
+        assertEquals(EnterAction.KEY_EVENT, TypingRules.enterAction(EditorInfo.IME_ACTION_NONE, single, false))
     }
 
     @Test

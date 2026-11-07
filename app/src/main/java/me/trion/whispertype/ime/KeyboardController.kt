@@ -76,6 +76,7 @@ class KeyboardController(
 
     private var mode = KeyboardLayout.Mode.LETTERS
     private var shiftState = ShiftState.OFF
+    private var autoCapCancelled = false
     private var isListening = false
     private var isTranscribing = false
     private var micButton: View? = null
@@ -124,6 +125,7 @@ class KeyboardController(
     }
 
     fun onStartInput() {
+        autoCapCancelled = false
         if (!isListening && !isTranscribing) {
             refreshReadyStatus()
         }
@@ -349,7 +351,7 @@ class KeyboardController(
     private fun shouldUppercase(): Boolean {
         if (mode != KeyboardLayout.Mode.LETTERS) return false
         if (shiftState != ShiftState.OFF) return true
-        if (!prefs.sentenceCaps) return false
+        if (!prefs.sentenceCaps || autoCapCancelled) return false
         val before = inputConnectionProvider()?.getTextBeforeCursor(64, 0)?.toString() ?: ""
         return TypingRules.shouldSentenceCap(before, fieldVariation())
     }
@@ -446,25 +448,33 @@ class KeyboardController(
             KeyType.PERIOD -> commitTyped(".")
             KeyType.ENTER -> {
                 learnCurrentWord()
-                val editorInfo = editorInfoProvider()
-                val action = editorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
-                if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED &&
-                    (editorInfo?.imeOptions?.and(EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0)
-                ) {
-                    ic.performEditorAction(action)
-                } else {
-                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+                val imeOptions = editorInfoProvider()?.imeOptions ?: 0
+                val inputType = editorInfoProvider()?.inputType ?: 0
+                when (TypingRules.enterAction(imeOptions, inputType, prefs.enterNewLine)) {
+                    // commitText, not a key event: chat apps can treat KEYCODE_ENTER as "send".
+                    EnterAction.NEW_LINE -> ic.commitText("\n", 1)
+                    EnterAction.EDITOR_ACTION -> ic.performEditorAction(imeOptions and EditorInfo.IME_MASK_ACTION)
+                    EnterAction.KEY_EVENT -> {
+                        ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+                        ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+                    }
                 }
                 refreshSuggestions()
             }
             KeyType.SHIFT -> {
-                shiftState = when (shiftState) {
-                    ShiftState.OFF -> ShiftState.ONCE
-                    ShiftState.ONCE -> ShiftState.LOCKED
-                    ShiftState.LOCKED -> ShiftState.OFF
+                // While auto-capitalize shows capitals, the first tap gives lowercase.
+                if (shiftState == ShiftState.OFF && !autoCapCancelled && shouldUppercase()) {
+                    autoCapCancelled = true
+                } else {
+                    autoCapCancelled = false
+                    shiftState = when (shiftState) {
+                        ShiftState.OFF -> ShiftState.ONCE
+                        ShiftState.ONCE -> ShiftState.LOCKED
+                        ShiftState.LOCKED -> ShiftState.OFF
+                    }
                 }
                 refreshKeyLabels()
+                return
             }
             KeyType.MODE_123 -> {
                 mode = KeyboardLayout.Mode.NUMBERS
@@ -486,6 +496,10 @@ class KeyboardController(
                 rebuildKeys()
             }
             KeyType.BACKSPACE, KeyType.MIC -> Unit
+        }
+        if (autoCapCancelled) {
+            autoCapCancelled = false
+            refreshKeyLabels()
         }
     }
     private fun routeEmojiSearchKey(key: KeyDef): Boolean {
@@ -851,8 +865,12 @@ class KeyboardController(
         var out = text.trim()
         if (out.isEmpty()) return
 
-        val before = ic.getTextBeforeCursor(1, 0)
-        if (prefs.autoSpace && !before.isNullOrEmpty()) {
+        val textBefore = ic.getTextBeforeCursor(64, 0)?.toString().orEmpty()
+        if (prefs.dictationMatchCase) {
+            out = TypingRules.matchDictationCase(out, textBefore, fieldVariation())
+        }
+        val before = textBefore.takeLast(1)
+        if (prefs.autoSpace && before.isNotEmpty()) {
             val ch = before[before.length - 1]
             if (!ch.isWhitespace() && ch != '\n') {
                 out = " $out"
