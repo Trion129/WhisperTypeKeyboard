@@ -341,8 +341,11 @@ class EmojiKeyboardIntegrationTest {
     private fun Char.toDebugText(): String = if (this == ' ') "<space>" else "'$this'"
 
     private companion object {
-        const val APP_PACKAGE = "me.trion.whispertype"
-        const val IME_COMPONENT = "$APP_PACKAGE/.ime.WhisperKeyboardService"
+        // The debug build installs with an applicationIdSuffix, and its view IDs
+        // carry that package too, so read it from the app under test.
+        val APP_PACKAGE: String =
+            InstrumentationRegistry.getInstrumentation().targetContext.packageName
+        val IME_COMPONENT = "$APP_PACKAGE/${WhisperKeyboardService::class.java.name}"
         const val POLL_INTERVAL_MS = 50L
         const val FEATURE_TIMEOUT_MS = 3_000L
         const val UI_TIMEOUT_MS = 5_000L
