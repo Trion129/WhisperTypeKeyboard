@@ -505,9 +505,16 @@ class KeyboardController(
     private fun routeEmojiSearchKey(key: KeyDef): Boolean {
         if (!isEmojiSearchActive()) return false
         when (key.type) {
-            KeyType.CHAR -> emojiSearchSession.append(key.label)
-            KeyType.SPACE -> emojiSearchSession.append(" ")
-            KeyType.BACKSPACE -> emojiSearchSession.backspace()
+            KeyType.CHAR, KeyType.SPACE, KeyType.BACKSPACE -> {
+                when (key.type) {
+                    KeyType.CHAR -> emojiSearchSession.append(key.label)
+                    KeyType.SPACE -> emojiSearchSession.append(" ")
+                    else -> emojiSearchSession.backspace()
+                }
+                // Query edits keep the same key rows, so only the result panel is redrawn.
+                showEmojiPanel()
+                return true
+            }
             KeyType.MODE_EMOJI -> {
                 emojiSearchSession.clear()
                 emojiPanelMode = EmojiPanelMode.BROWSE
@@ -720,7 +727,7 @@ class KeyboardController(
     private fun deleteOnce() {
         if (isEmojiSearchActive()) {
             emojiSearchSession.backspace()
-            rebuildKeys()
+            showEmojiPanel()
             return
         }
         val ic = inputConnectionProvider() ?: return

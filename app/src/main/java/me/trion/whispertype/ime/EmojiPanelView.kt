@@ -145,6 +145,7 @@ internal class EmojiPanelView(
             id = R.id.emoji_result_grid
             orientation = LinearLayout.VERTICAL
         }
+        val scroll = ScrollView(context).apply { addView(grid) }
         if (items.isEmpty()) {
             if (showNoResults) {
                 grid.addView(TextView(context).apply {
@@ -155,38 +156,54 @@ internal class EmojiPanelView(
                     setTextColor(ContextCompat.getColor(context, R.color.key_text_secondary))
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
             }
-        } else {
-            var row: LinearLayout? = null
-            items.forEachIndexed { index, item ->
-                if (index % GRID_COLUMNS == 0) {
-                    row = LinearLayout(context).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                    }
-                    grid.addView(
-                        row,
-                        LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)),
-                    )
-                }
-                val cell = TextView(context).apply {
-                    text = item.emoji
-                    contentDescription = item.name
-                    gravity = Gravity.CENTER
-                    textSize = 18f
-                    setOnClickListener { onEmoji(item) }
-                    if (item.toneCapable) {
-                        setOnLongClickListener {
-                            onTones(this, item.tones)
-                            true
-                        }
-                    }
-                }
-                row!!.addView(
-                    cell,
-                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f),
+            return scroll
+        }
+
+        // A short query can match most of the catalog, and building a view per
+        // emoji on every key press is what made search slow. Build a few rows
+        // now and the rest as the user scrolls toward them.
+        val rows = items.chunked(GRID_COLUMNS)
+        var built = 0
+        fun buildMore() {
+            val end = (built + ROW_BATCH).coerceAtMost(rows.size)
+            for (i in built until end) {
+                grid.addView(
+                    emojiRow(rows[i], onEmoji, onTones),
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)),
                 )
             }
+            built = end
         }
-        return ScrollView(context).apply { addView(grid) }
+        buildMore()
+        scroll.setOnScrollChangeListener { view, _, scrollY, _, _ ->
+            if (built < rows.size && scrollY + view.height >= grid.height - view.height) buildMore()
+        }
+        return scroll
+    }
+
+    private fun emojiRow(
+        items: List<EmojiItem>,
+        onEmoji: (EmojiItem) -> Unit,
+        onTones: (View, List<String>) -> Unit,
+    ): LinearLayout {
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        items.forEach { item ->
+            val cell = TextView(context).apply {
+                text = item.emoji
+                contentDescription = item.name
+                gravity = Gravity.CENTER
+                textSize = 18f
+                setOnClickListener { onEmoji(item) }
+                if (item.toneCapable) {
+                    setOnLongClickListener {
+                        onTones(this, item.tones)
+                        true
+                    }
+                }
+            }
+            row.addView(cell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+        }
+        return row
     }
 
     private fun attach(view: View) {
@@ -203,6 +220,8 @@ internal class EmojiPanelView(
 
     private companion object {
         const val GRID_COLUMNS = 8
+        // Taller than either panel, so the first batch always fills it and can scroll.
+        const val ROW_BATCH = 12
         const val RECENTS_GROUP = "recents"
     }
 }
