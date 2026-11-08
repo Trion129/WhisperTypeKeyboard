@@ -1,0 +1,7 @@
+1.6.0: Multilingual dictation.
+- New: Spanish, French and German with Canary 180M Flash (punctuation and capitals).
+- New: Hindi with IndicConformer (about 2% character error on real speech).
+- New: Hinglish (Hindi in Latin script) with Oriserve Swift.
+- Long dictation is split at speech pauses, so words are not cut.
+- Fix: keys showed capitals but typed small letters.
+- One "Auto capitalization" setting; new Enter key options.

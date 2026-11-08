@@ -68,5 +68,5 @@ VercodeOperation:
   - 10 * %c + 2
   - 10 * %c + 3
   - 10 * %c + 4
-CurrentVersion: 1.5.3
-CurrentVersionCode: 124
+CurrentVersion: 1.6.0
+CurrentVersionCode: 134
