@@ -174,6 +174,56 @@ class EmojiKeyboardIntegrationTest {
         )
     }
 
+    @Test
+    fun reopenedKeyboardShowsTheCaseItTypes() {
+        awaitKeyLabel("r", "R", "An empty field did not show auto-capitalized keys")
+
+        // Reopen the keyboard on a field that is mid-sentence.
+        activityRule.scenario.onActivity { activity ->
+            val field = activity.findViewById<EditText>(R.id.test_input)
+            field.setText("see you tomor")
+            field.setSelection(field.text.length)
+        }
+        requestKeyboard()
+
+        awaitKeyLabel("r", "r", "Keys still showed capitals after reopening mid-sentence")
+        typeNormalKeys("r")
+        awaitFieldText("see you tomorr", "The key typed a different case than its label showed")
+    }
+
+    @Test
+    fun keyLabelsFollowTheCursor() {
+        activityRule.scenario.onActivity { activity ->
+            val field = activity.findViewById<EditText>(R.id.test_input)
+            field.setText("Hi. hello")
+            field.setSelection(field.text.length)
+        }
+        awaitKeyLabel("a", "a", "Keys showed capitals mid-sentence")
+
+        activityRule.scenario.onActivity { activity ->
+            activity.findViewById<EditText>(R.id.test_input).setSelection(4)
+        }
+        awaitKeyLabel("a", "A", "Keys did not show capitals after the cursor moved to a sentence start")
+        typeNormalKeys("a")
+        awaitFieldText("Hi. Ahello", "The key typed a different case than its label showed")
+    }
+
+    private fun awaitKeyLabel(key: String, expected: String, failureContext: String) {
+        val selector = By.desc("key-$key")
+        val deadline = SystemClock.uptimeMillis() + UI_TIMEOUT_MS
+        var actual: String? = null
+        while (SystemClock.uptimeMillis() < deadline) {
+            actual = try {
+                device.findObject(selector)?.text
+            } catch (e: StaleObjectException) {
+                null
+            }
+            if (actual == expected) return
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        throw AssertionError("$failureContext: key '$key' showed '$actual', expected '$expected'")
+    }
+
     private fun openEmojiSearch() {
         clickResource(
             resourceName = "btn_emoji_strip",

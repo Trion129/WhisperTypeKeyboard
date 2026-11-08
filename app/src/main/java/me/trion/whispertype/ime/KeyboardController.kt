@@ -129,6 +129,9 @@ class KeyboardController(
         if (!isListening && !isTranscribing) {
             refreshReadyStatus()
         }
+        // The labels were drawn for the previous field; redraw them for this one
+        // so they show the same case a key press will type.
+        refreshKeyLabels()
         refreshSuggestions()
         incognitoGlyph.visibility = if (isPrivate()) View.VISIBLE else View.GONE
     }
@@ -153,6 +156,11 @@ class KeyboardController(
         recorder.onSegmentFile = null
         recorder.onError = null
         asr.release()
+    }
+
+    /** The cursor moved; auto capitalization depends on the text before it. */
+    fun onSelectionChanged() {
+        refreshKeyLabels()
     }
 
     fun onClipboardChanged() {
