@@ -118,10 +118,6 @@ class SettingsActivity : AppCompatActivity() {
             isChecked = prefs.enterNewLine
             setOnCheckedChangeListener { _, checked -> prefs.enterNewLine = checked }
         }
-        findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.switch_dictation_match_case).apply {
-            isChecked = prefs.dictationMatchCase
-            setOnCheckedChangeListener { _, checked -> prefs.dictationMatchCase = checked }
-        }
 
 
         btnDownload.setOnClickListener { startDownload() }

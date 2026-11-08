@@ -16,7 +16,7 @@ all speech recognition runs on-device.
 | Emoji | Categorized Unicode picker with search, recents, and skin tones (`😀`) |
 | Clipboard | Last 20 text clips, captured while WhisperType is enabled, tap to paste, swipe or × to delete |
 | Voice | Offline via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); Silero VAD cuts at speech pauses while the microphone stays open and packs the speech into parts of about 24 s; dense scripts (Hindi, CJK, Arabic, ...) decode in the full Whisper window; elapsed-time indicator and manual stop; successful portions commit even if another segment fails |
-| Models | English/multilingual Whisper, Canary 180M Flash EN/ES/DE/FR, Oriserve Swift Hindi2Hinglish, Parakeet CTC English; offline ZIP imports |
+| Models | English/multilingual Whisper, Canary 180M Flash EN/ES/DE/FR, IndicConformer Hindi, Oriserve Swift Hindi2Hinglish, Parakeet CTC English; offline ZIP imports |
 | Privacy | No API keys — audio, clipboard, and learned words stay on the device |
 
 ## Setup
@@ -37,10 +37,11 @@ history.
 
 ## Models and languages
 
+- **IndicConformer Hindi** (~198 MB): Devanagari Hindi, the strongest Hindi option here (2.1% character error on 50 real FLEURS clips, no repeat loops). Writes plain words, without punctuation or capitals. The adapter uses the exported NeMo CTC graph.
 - **Oriserve Swift Hindi2Hinglish** (~161 MB): Hindi/Hinglish in **Romanized script**, not Devanagari. The adapter uses the Hindi language token.
-- **Canary 180M Flash** (~207 MB): fast non-autoregressive EN/ES/DE/FR with casing and punctuation; language is selected, not auto-detected. The adapter uses the target-language token.
+- **Canary 180M Flash** (~207 MB): EN/ES/DE/FR with casing and punctuation; language is selected, not auto-detected. The adapter sets the spoken and the written language to the selected one (transcription, never translation) and keeps parts under 30 s (NVIDIA: under 40 s).
 - **Parakeet TDT CTC 110M English** (~132 MB): the exported **NeMo CTC** graph, with English casing and punctuation. This is not a TDT/transducer adapter.
-- **Whisper Tiny/Base/Small Multilingual**: auto-detect or a selected language, including Hindi in its native script.
+- **Whisper Small Multilingual** (~375 MB): auto-detect or a selected language, including Hindi in its native script.
 - **Whisper Tiny/Base/Small EN**: English only; Base EN remains the default.
 
 Fixed-language models disable the language picker without overwriting the saved
@@ -125,6 +126,7 @@ app/src/main/java/me/trion/whispertype/
 
 - On-device ASR runtime: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0), which bundles ONNX Runtime (MIT)
 - Whisper models from the `csukuangfj/sherpa-onnx-whisper-*` packs on [Hugging Face](https://huggingface.co/csukuangfj) (OpenAI Whisper weights, MIT)
+- [AI4Bharat IndicConformer Hi](https://huggingface.co/ai4bharat/indicconformer_stt_hi_hybrid_ctc_rnnt_large) (MIT), NeMo CTC graph from the pinned [sherpa export](https://huggingface.co/parismitaglobalsolutions/indicconformer-sherpa-onnx)
 - [Oriserve Hindi2Hinglish Swift](https://huggingface.co/Oriserve/Whisper-Hindi2Hinglish-Swift) (Apache-2.0), using the pinned [sherpa export](https://huggingface.co/parismitaglobalsolutions/indicconformer-sherpa-onnx)
 - NVIDIA Parakeet CTC (CC-BY-4.0), sherpa export distributed through the pinned [VocaHQ mirror](https://huggingface.co/VocaHQ/sherpa-onnx-nemo-parakeet-tdt-ctc-110m-en-int8)
 - NVIDIA Canary 180M Flash (CC-BY-4.0), pinned [sherpa export](https://huggingface.co/csukuangfj/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8)

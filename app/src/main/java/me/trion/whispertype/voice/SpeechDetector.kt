@@ -16,6 +16,12 @@ interface SpeechDetector {
 
     /** Returns the next complete speech segment. Call [pop] after this. */
     fun takeSegment(): FloatArray
+
+    /**
+     * Sample index of the next segment's first sample, counted from the
+     * detector's creation or last [reset]; -1 when the detector cannot tell.
+     */
+    fun segmentStart(): Long = -1
     fun pop()
     fun flush()
     fun reset()
@@ -55,6 +61,7 @@ class SileroSpeechDetector(
     override fun accept(samples: FloatArray) = vad.acceptWaveform(samples)
     override fun hasSegment(): Boolean = !vad.empty()
     override fun takeSegment(): FloatArray = vad.front().samples
+    override fun segmentStart(): Long = vad.front().start.toLong()
     override fun pop() = vad.pop()
     override fun flush() = vad.flush()
     override fun reset() = vad.reset()

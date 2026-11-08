@@ -34,10 +34,6 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean(KEY_ENTER_NEW_LINE, false)
         set(value) = prefs.edit().putBoolean(KEY_ENTER_NEW_LINE, value).apply()
 
-    var dictationMatchCase: Boolean
-        get() = prefs.getBoolean(KEY_DICTATION_MATCH_CASE, true)
-        set(value) = prefs.edit().putBoolean(KEY_DICTATION_MATCH_CASE, value).apply()
-
     var activeModelId: String
         get() = prefs.getString(KEY_ACTIVE_MODEL_ID, "") ?: ""
         set(value) = prefs.edit().putString(KEY_ACTIVE_MODEL_ID, value).apply()
@@ -92,7 +88,6 @@ class Prefs(context: Context) {
         const val KEY_DOUBLE_SPACE_PERIOD = "double_space_period"
         const val KEY_SENTENCE_CAPS = "sentence_caps"
         const val KEY_ENTER_NEW_LINE = "enter_new_line"
-        const val KEY_DICTATION_MATCH_CASE = "dictation_match_case"
         const val KEY_ACTIVE_MODEL_ID = "active_model_id"
         const val KEY_TRANSCRIPTION_LANGUAGE = "transcription_language"
         const val KEY_EMOJI_RECENTS = "emoji_recents"

@@ -873,7 +873,7 @@ class KeyboardController(
         if (out.isEmpty()) return
 
         val textBefore = ic.getTextBeforeCursor(64, 0)?.toString().orEmpty()
-        if (prefs.dictationMatchCase) {
+        if (prefs.sentenceCaps) {
             out = TypingRules.matchDictationCase(out, textBefore, fieldVariation())
         }
         val before = textBefore.takeLast(1)

@@ -244,7 +244,7 @@ class SherpaWhisperEngineTest {
         assertEquals(3, backend.inputs.size)
         assertTrue(backend.inputs.all { it.size == 471_840 })
         assertEquals(2, trace!!.splitDecodes)
-        assertTrue(text.startsWith("Tok0 tok1"))
+        assertTrue(text.startsWith("tok0 tok1"))
         assertTrue(text.endsWith("tok69"))
     }
 
@@ -274,7 +274,8 @@ class SherpaWhisperEngineTest {
 
         engine.transcribe(FloatArray(20 * 16_000), 16_000)
 
-        assertEquals(1, backend.inputs.size)
+        // One decode, plus the loop retry without the lead-in; no split decodes.
+        assertEquals(2, backend.inputs.size)
     }
 
     @Test
@@ -283,5 +284,77 @@ class SherpaWhisperEngineTest {
         for (i in 14 * 16_000 until 15 * 16_000) audio[i] = 0f
         val cut = SherpaWhisperEngine.quietestCut(audio, 16_000)
         assertTrue(cut in 14 * 16_000 until 15 * 16_000)
+    }
+    @Test
+    fun `sanitize trims a repeated word runaway and keeps the first copy`() {
+        assertEquals("x y अगर", SherpaWhisperEngine.sanitizeTranscript("x y अगर अगर अगर अगर अगर अगर अगर"))
+        assertEquals("a b", SherpaWhisperEngine.sanitizeTranscript("a b a b a b a b a b a b"))
+        assertEquals("a b c", SherpaWhisperEngine.sanitizeTranscript("a b c"))
+        // Speech repeats words a few times on purpose; those stay.
+        assertEquals("no no no no", SherpaWhisperEngine.sanitizeTranscript("no no no no"))
+        assertEquals("very very", SherpaWhisperEngine.sanitizeTranscript("very very"))
+    }
+
+    @Test
+    fun `sanitize collapses repeated half characters inside a word`() {
+        val trimmed = SherpaWhisperEngine.sanitizeTranscript("प्रट्ट्ट्ट्ट्ट्ट्ट्ट्ट्ट्ट्ट्ट्ट्ट्ट्ट")
+        assertTrue(trimmed, trimmed.startsWith("प्रट्") && trimmed.length <= 12)
+        assertEquals("ab", SherpaWhisperEngine.sanitizeTranscript("abababababababab"))
+    }
+
+    @Test
+    fun `sanitize keeps digits, punctuation and short letter runs`() {
+        assertEquals("1000000", SherpaWhisperEngine.sanitizeTranscript("1000000"))
+        assertEquals("Wait......", SherpaWhisperEngine.sanitizeTranscript("Wait......"))
+        assertEquals("hahahaha", SherpaWhisperEngine.sanitizeTranscript("hahahaha"))
+        assertEquals("Mississippi", SherpaWhisperEngine.sanitizeTranscript("Mississippi"))
+    }
+
+    @Test
+    fun `sanitize drops replacement characters`() {
+        assertEquals("abcd", SherpaWhisperEngine.sanitizeTranscript("ab\uFFFDcd"))
+    }
+
+    private fun resultText(text: String): OfflineRecognizerResult {
+        val tokens = text.split(" ").toTypedArray()
+        return OfflineRecognizerResult(text = text, tokens = tokens, timestamps = FloatArray(tokens.size),
+            lang = "hi", emotion = "", event = "", durations = FloatArray(tokens.size))
+    }
+
+    @Test
+    fun `a looped decode is retried without the lead-in and the clean retry wins`() {
+        val backend = FakeBackend(resultText("आप आप आप आप आप आप आप"), resultText("आज मौसम अच्छा है"))
+        val engine = SherpaWhisperEngine("hi", backend)
+
+        val text = engine.transcribe(FloatArray(5 * 16_000), 16_000)
+
+        assertEquals("आज मौसम अच्छा है", text)
+        assertEquals(2, backend.inputs.size)
+    }
+
+    @Test
+    fun `when both decodes loop the longer cleaned text stays`() {
+        val backend = FakeBackend(resultText("आज मौसम अगर अगर अगर अगर अगर अगर"), resultText("आप आप आप आप आप आप"))
+        val engine = SherpaWhisperEngine("hi", backend)
+
+        assertEquals("आज मौसम अगर", engine.transcribe(FloatArray(5 * 16_000), 16_000))
+    }
+
+    @Test
+    fun `a clean decode is not retried`() {
+        val backend = FakeBackend(resultText("आज मौसम अच्छा है"))
+        val engine = SherpaWhisperEngine("hi", backend)
+
+        engine.transcribe(FloatArray(5 * 16_000), 16_000)
+
+        assertEquals(1, backend.inputs.size)
+    }
+
+    @Test
+    fun `a lone run of combining marks counts as a loop`() {
+        assertTrue(SherpaWhisperEngine.hasRunaway("यह तब बद़़़़़़़़़़़़"))
+        val cleaned = SherpaWhisperEngine.sanitizeTranscript("यह तब बद़़़़़़़़़़़़")
+        assertTrue(cleaned, cleaned.startsWith("यह तब बद़") && cleaned.length <= "यह तब बद़़़".length)
+        assertFalse(SherpaWhisperEngine.hasRunaway("1000000 Mississippi hahahaha"))
     }
 }

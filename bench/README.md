@@ -27,12 +27,37 @@ faster-whisper (full OpenAI decoder: beam search + temperature fallback) is
 the **quality reference**, not an app dependency. It pulls
 `Systran/faster-whisper-<size>` on first use.
 
+## Real-speech quality bench (paired with whisper.cpp)
+
+Runs the app's exact production path (VAD handoff in phone-sized chunks, WAV
+persistence, `WavReader`, `AsrEngineFactory`, segment joining) over cached
+**real human recordings** with their exact written reference, then decodes the
+same clips with whisper.cpp (the runtime consumer apps in this space use) and
+prints a paired summary. This is the check that caught two real regressions
+the TTS-fixture bench could not see: Canary was configured as
+English->Spanish *translation* (srcLang defaulted to "en"), which turned
+Spanish speech into a translation of misheard English, and Whisper Small's
+dense-language padding produced repeat runaways (`अगर अगर अगर ...`) because
+no repeat guard existed in front of the greedy decoder.
+
+```bash
+WHISPERTYPE_REAL_PY=/tmp/whisper-check/.venv/bin/python bench/real_speech.sh canary-180m-flash es es-all
+WHISPERTYPE_REAL_PY=/tmp/whisper-check/.venv/bin/python bench/real_speech.sh small hi hi-all
+WHISPERTYPE_REAL_PY=/tmp/whisper-check/.venv/bin/python bench/real_speech.sh small "" hi-all
+```
+
+Data is fetched once into `~/.cache/whispertype-host/data/{es-all,hi-all}`
+(fetch once with `python3 bench/fetch_real.py`: FLEURS es/hi, Multilingual LibriSpeech Spanish, VoxPopuli Spanish, IndicTTS
+Hindi; 75 Spanish + 50 Hindi real clips, none generated). Score is WER for
+Spanish refs and CER for Devanagari refs, plus repeat-loop / invalid-character
+/ out-of-script counters. The whisper.cpp reference uses `ggml-small.bin`.
+
 ## Quick host check (real Kotlin pipeline, no emulator)
 
 Runs the app's `WavReader`, `ModelCatalog` descriptor resolution and shared `AsrEngineFactory` on the host JVM using the same sherpa-onnx JNI version as the app. The host replay uses Whisper or NeMo CTC according to the descriptor; token-cap trace columns are emitted only for Whisper.
 
 ```bash
-bench/host_replay.sh tiny                              # English Whisper
+bench/host_replay.sh tiny.en                           # English Whisper
 bench/host_replay.sh small hi bench/fixtures
 bench/host_replay.sh oriserve-swift hi bench/fixtures
 bench/host_replay.sh parakeet-ctc-110m en bench/fixtures
@@ -59,7 +84,7 @@ For recordings longer than 60 seconds, concatenate fixture WAVs into
 adapter/segmenter path against each installed backend:
 
 ```bash
-WHISPERTYPE_HOST_SEGMENTED=1 bench/host_replay.sh base en /tmp/long-fixture
+WHISPERTYPE_HOST_SEGMENTED=1 bench/host_replay.sh base.en en /tmp/long-fixture
 WHISPERTYPE_HOST_SEGMENTED=1 bench/host_replay.sh parakeet-ctc-110m en /tmp/long-fixture
 ```
 

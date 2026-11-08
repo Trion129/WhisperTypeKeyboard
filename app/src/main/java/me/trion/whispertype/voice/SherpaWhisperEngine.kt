@@ -89,6 +89,28 @@ class SherpaWhisperEngine internal constructor(
      * decoded once, which avoids the wasted real-length pass.
      */
     override fun transcribe(samples: FloatArray, sampleRate: Int): String {
+        val first = transcribeOnce(samples, sampleRate)
+        if (!sawRunaway) return first
+        // A greedy decode that ran into a repeat loop gets one more try without
+        // the audio lead-in the VAD handoff adds: on real Hindi speech the
+        // lead-in sometimes starts the loop at the first word. Keep the retry
+        // unless it loops too and kept less text.
+        val trim = (VadSegmentHandoff.PRE_CONTEXT_MS * sampleRate / 1000).toInt()
+        if (samples.size - trim < sampleRate) return first
+        val second = transcribeOnce(samples.copyOfRange(trim, samples.size), sampleRate)
+        return if (!sawRunaway || second.length > first.length) second else first
+    }
+
+    /** Set by [clean] when a decode of the current pass ended in a repeat loop. */
+    private var sawRunaway = false
+
+    private fun clean(raw: String): String {
+        if (hasRunaway(raw)) sawRunaway = true
+        return sanitizeTranscript(raw)
+    }
+
+    private fun transcribeOnce(samples: FloatArray, sampleRate: Int): String {
+        sawRunaway = false
         val padUpFront = denseHint || detectedDense
         val input = if (padUpFront) padToWhisperWindow(samples, sampleRate) else samples
         val firstStart = System.nanoTime()
@@ -111,7 +133,7 @@ class SherpaWhisperEngine internal constructor(
         val text = if (chosenPadded && filledWindow(chosen, samples.size, sampleRate)) {
             decodeSplit(samples, sampleRate, depth = 1)
         } else {
-            chosen.text.trim()
+            clean(chosen.text)
         }
         onTrace?.invoke(
             Trace(
@@ -156,7 +178,7 @@ class SherpaWhisperEngine internal constructor(
         return if (depth < MAX_SPLIT_DEPTH && filledWindow(result, samples.size, sampleRate)) {
             decodeSplit(samples, sampleRate, depth + 1)
         } else {
-            result.text.trim()
+            clean(result.text)
         }
     }
 
@@ -276,11 +298,60 @@ class SherpaWhisperEngine internal constructor(
         ): OfflineRecognizerResult =
             if (retried.tokens.size > first.tokens.size) retried else first
 
-        /** Two split levels: at most 1 + 2 + 4 decodes for one part. */
+        /**
+     * Greedy decodes can run away: a short block repeats until the token cap
+     * (`अगर अगर अगर ...`) or half characters repeat inside a word
+     * (`स्ट्ट्ट्ट्ट`). whisper.cpp answers this with a temperature fallback;
+     * sherpa-onnx has none, so trim to the first copy of the block instead.
+     * Measured on 50 real Hindi clips: the padded decode stays (23% character
+     * error vs 57% at the real length), this trims its repeat runaways.
+     */
+    internal fun sanitizeTranscript(text: String): String {
+        val clean = text.replace("\uFFFD", "")
+        var out = trimRepeatRunaway(clean)
+        out = CHAR_LOOP.replace(out) { match -> match.groupValues[1] }
+        return out.trim()
+    }
+
+    /** True when [text] holds a repeat runaway that [sanitizeTranscript] trims. */
+    internal fun hasRunaway(text: String): Boolean {
+        val clean = text.replace("\uFFFD", "")
+        return trimRepeatRunaway(clean) != clean || CHAR_LOOP.containsMatchIn(clean)
+    }
+
+    /** Trim everything after the first copy of a block that repeats [REPEAT_COPIES]+ times. */
+    private fun trimRepeatRunaway(text: String): String {
+        val words = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val n = words.size
+        for (start in 0 until n) {
+            for (block in 1..REPEAT_BLOCK_MAX) {
+                if (start + block * REPEAT_COPIES > n) break
+                var copies = 1
+                while (sameBlock(words, start, start + block * copies, block)) copies++
+                if (copies >= REPEAT_COPIES) return words.take(start + block).joinToString(" ")
+            }
+        }
+        return text
+    }
+
+    private fun sameBlock(words: List<String>, a: Int, b: Int, block: Int): Boolean {
+        if (b + block > words.size) return false
+        for (k in 0 until block) if (words[a + k] != words[b + k]) return false
+        return true
+    }
+
+    /** Two split levels: at most 1 + 2 + 4 decodes for one part. */
         private const val MAX_SPLIT_DEPTH = 2
         private const val MIN_SPLIT_SECONDS = 4
         private const val LOOP_WINDOW = 24
         private const val LOOP_MAX_DISTINCT = 4
+
+        // Real runaways repeat 20+ times; speech repeats a word 2-4 times ("no no no").
+        private const val REPEAT_COPIES = 5
+        private const val REPEAT_BLOCK_MAX = 4
+        // Letters and combining marks (a lone run of nukta `़` is a loop too), so digits ("1000000") and
+        // punctuation ("...") are never touched.
+        private val CHAR_LOOP = Regex("([\\p{L}\\p{M}]{1,3})\\1{5,}")
 
         /**
          * True when a padded decode used the whole window budget on real

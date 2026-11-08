@@ -35,18 +35,18 @@ class TranscriptJoinTest {
     @Test
     fun `empty parts are skipped`() {
         assertEquals(
-            "Hello there",
+            "hello there",
             join(TranscriptPart("", true), TranscriptPart("hello", false), TranscriptPart("  ", true), TranscriptPart("there", true)),
         )
     }
 
     @Test
-    fun `the first part has no leading space and keeps capitalization`() {
-        assertEquals("We went to the Store", join(TranscriptPart("we went", true), TranscriptPart("to the Store", true)))
+    fun `the first part has no leading space and keeps the model case`() {
+        assertEquals("we went to the Store", join(TranscriptPart("we went", true), TranscriptPart("to the Store", true)))
     }
 
     @Test
     fun `plain string parts keep a space between them`() {
-        assertEquals("We went to the Store", joinTranscriptSegments(listOf("we went", "to the Store")))
+        assertEquals("we went to the Store", joinTranscriptSegments(listOf("we went", "to the Store")))
     }
 }

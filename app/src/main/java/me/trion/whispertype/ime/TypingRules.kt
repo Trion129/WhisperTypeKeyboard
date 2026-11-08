@@ -23,17 +23,19 @@ object TypingRules {
     }
 
     /**
-     * Whisper starts every transcript with a capital letter. When dictation
-     * resumes mid-sentence, lowercase that first word again. Words that look
-     * deliberate ("I", "I'm", "OK", "iPhone") stay as they are.
+     * Auto capitalization for dictation. Models capitalize the first word of
+     * every transcript (or of none), so make it follow the text before the
+     * cursor: a capital when a new sentence starts, lowercase mid-sentence.
+     * Words that look deliberate ("I", "I'm", "OK", "iPhone") stay as they are.
      */
     fun matchDictationCase(transcript: String, textBeforeCursor: String, variation: FieldVariation): String {
         if (variation != FieldVariation.NORMAL) return transcript
-        if (textBeforeCursor.trimEnd(' ', '\t').endsWith('\n')) return transcript
-        if (shouldSentenceCap(textBeforeCursor, variation)) return transcript
         val firstWord = transcript.takeWhile { !it.isWhitespace() }
+        if (firstWord.isEmpty() || firstWord.drop(1).any { it.isUpperCase() }) return transcript
+        val sentenceStart = textBeforeCursor.trimEnd(' ', '\t').endsWith('\n') ||
+            shouldSentenceCap(textBeforeCursor, variation)
+        if (sentenceStart) return transcript.replaceFirstChar { it.uppercaseChar() }
         if (firstWord.length < 2 || !firstWord[0].isUpperCase()) return transcript
-        if (firstWord.drop(1).any { it.isUpperCase() }) return transcript
         if (firstWord[0] == 'I' && !firstWord[1].isLetter()) return transcript
         return transcript.replaceFirstChar { it.lowercaseChar() }
     }

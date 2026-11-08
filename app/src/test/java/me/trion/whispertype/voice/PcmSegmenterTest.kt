@@ -29,8 +29,8 @@ class PcmSegmenterTest {
         assertArrayEquals(pcm, result.single() + segmenter.finish()!!)
     }
 
-    @Test fun `joined segments capitalize only the transcript start`() {
-        assertEquals("We went to the Store", joinTranscriptSegments(listOf("we went", "to the Store")))
+    @Test fun `joined segments keep the model case`() {
+        assertEquals("we went to the Store", joinTranscriptSegments(listOf("we went", "to the Store")))
     }
 
     @Test fun `handoff emits bounded chunks in order then final partial exactly once`() {

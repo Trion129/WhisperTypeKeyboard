@@ -18,8 +18,6 @@ object ModelCatalog {
         whisper("tiny.en", "Whisper Tiny EN", 104, multilingual = false),
         whisper("base.en", "Whisper Base EN", 161, multilingual = false),
         whisper("small.en", "Whisper Small EN", 375, multilingual = false),
-        whisper("tiny", "Whisper Tiny Multilingual", 104, multilingual = true),
-        whisper("base", "Whisper Base Multilingual", 161, multilingual = true),
         whisper("small", "Whisper Small Multilingual", 375, multilingual = true),
         ModelSpec(
             id = "oriserve-swift",
@@ -39,6 +37,35 @@ object ModelCatalog {
             description = "Hindi and Hinglish transcription in Romanized script; no Devanagari transliteration.",
             sourceUrl = "https://huggingface.co/Oriserve/Whisper-Hindi2Hinglish-Swift",
             license = "Apache-2.0",
+            revision = "9721eb71eea141fae0982cfcdb9dd2e3d4953c4a",
+        ),
+        ModelSpec(
+            id = "indicconformer-hi",
+            title = "IndicConformer Hindi",
+            approxSizeMb = 198,
+            layout = ModelLayout.NemoCtc(
+                model = "model.int8.onnx",
+                tokens = "tokens.txt",
+            ),
+            // AI4Bharat IndicConformer is Hindi only; no language picker needed.
+            languagePolicy = LanguagePolicy.Fixed("hi", "Hindi (Devanagari)"),
+            artifacts = listOf(
+                ModelArtifact(
+                    "model.int8.onnx",
+                    "https://huggingface.co/parismitaglobalsolutions/indicconformer-sherpa-onnx/resolve/9721eb71eea141fae0982cfcdb9dd2e3d4953c4a/hi/model.int8.onnx",
+                    197595593L,
+                    "915c71e04dd7e5378a4057fdebb252b3a587188e4e99db6d7ce0909ad5ad05fa",
+                ),
+                ModelArtifact(
+                    "tokens.txt",
+                    "https://huggingface.co/parismitaglobalsolutions/indicconformer-sherpa-onnx/resolve/9721eb71eea141fae0982cfcdb9dd2e3d4953c4a/tokens.txt",
+                    67605L,
+                    "ee60967630213f31951817ac8b402b92ec18cce80718a24a49b388e56672dfb2",
+                ),
+            ),
+            description = "Hindi in Devanagari script, measured 3% character error on real FLEURS speech; plain words without punctuation or capitals.",
+            sourceUrl = "https://huggingface.co/ai4bharat/indicconformer_stt_hi_hybrid_ctc_rnnt_large",
+            license = "MIT",
             revision = "9721eb71eea141fae0982cfcdb9dd2e3d4953c4a",
         ),
         ModelSpec(

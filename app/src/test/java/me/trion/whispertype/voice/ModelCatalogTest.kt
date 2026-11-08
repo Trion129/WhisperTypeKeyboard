@@ -28,7 +28,7 @@ class ModelCatalogTest {
             spec.layout,
         )
         assertEquals(LanguagePolicy.Selectable(listOf("en", "es", "de", "fr"), defaultCode = "en"), spec.languagePolicy)
-        assertEquals(45_000L, spec.maxSegmentMs)
+        assertEquals(30_000L, spec.maxSegmentMs)
         assertEquals(207, spec.approxSizeMb)
         assertEquals("9077164e0d3dd1d5353743e89ceaa1d3a770838c", spec.revision)
         assertEquals(
@@ -46,6 +46,27 @@ class ModelCatalogTest {
         assertEquals("es", policy.effectiveLanguage("es"))
         assertEquals("en", policy.effectiveLanguage("hi"))
         assertEquals("en", policy.effectiveLanguage(""))
+    }
+
+    @Test
+    fun `indicconformer entry pins its Hindi export and needs no language picker`() {
+        val spec = requireNotNull(ModelCatalog.byId("indicconformer-hi"))
+
+        assertEquals(ModelLayout.NemoCtc("model.int8.onnx", "tokens.txt"), spec.layout)
+        assertEquals(LanguagePolicy.Fixed("hi", "Hindi (Devanagari)"), spec.languagePolicy)
+        assertEquals(198, spec.approxSizeMb)
+        assertEquals("9721eb71eea141fae0982cfcdb9dd2e3d4953c4a", spec.revision)
+        assertEquals("MIT", spec.license)
+        assertEquals(
+            mapOf(
+                "model.int8.onnx" to
+                    (197595593L to "915c71e04dd7e5378a4057fdebb252b3a587188e4e99db6d7ce0909ad5ad05fa"),
+                "tokens.txt" to
+                    (67605L to "ee60967630213f31951817ac8b402b92ec18cce80718a24a49b388e56672dfb2"),
+            ),
+            spec.artifacts.associate { it.path to (it.sizeBytes to it.sha256) },
+        )
+        assertEquals("hi", spec.languagePolicy.effectiveLanguage("en"))
     }
 
     private fun ModelSpec.requiredPathsDeclared(): Boolean =

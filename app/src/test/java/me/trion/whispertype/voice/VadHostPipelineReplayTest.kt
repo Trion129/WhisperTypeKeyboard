@@ -46,6 +46,8 @@ class VadHostPipelineReplayTest {
             out.absoluteFile.parentFile?.mkdirs()
             out.bufferedWriter(Charsets.UTF_8).use { writer ->
                 for (wav in wavs) {
+                    // Each file is one recording, as LocalAsrEngine.onRecordingStart marks it.
+                    (engine as? SherpaWhisperEngine)?.onRecordingStart()
                     val t0 = System.nanoTime()
                     val input = WavReader.read(wav)
                     val pcm = toPcm16(input.samples)
@@ -70,7 +72,9 @@ class VadHostPipelineReplayTest {
                     val texts = ArrayList<TranscriptPart>()
                     var startsAfterPause = false
                     for ((segment, boundary) in segments) {
-                        val samples = fromPcm16(segment)
+                        // The phone writes each part to a WAV and LocalAsrEngine reads it
+                        // back through WavReader, which peak-normalizes the part.
+                        val samples = WavReader.read(wavBytes(segment, input.sampleRate)).samples
                         totalSamples += samples.size
                         assertTrue(
                             "segment longer than the model limit in ${wav.name}",
@@ -128,14 +132,13 @@ class VadHostPipelineReplayTest {
         return pcm
     }
 
-    private fun fromPcm16(pcm: ByteArray): FloatArray {
-        val samples = FloatArray(pcm.size / 2)
-        for (i in samples.indices) {
-            val value = ((pcm[2 * i + 1].toInt() shl 8) or (pcm[2 * i].toInt() and 0xff)).toShort().toInt()
-            samples[i] = value / 32768f
-        }
-        return samples
-    }
+    private fun wavBytes(pcm: ByteArray, sampleRate: Int): ByteArray =
+        java.nio.ByteBuffer.allocate(44 + pcm.size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .put("RIFF".toByteArray(Charsets.US_ASCII)).putInt(pcm.size + 36)
+            .put("WAVE".toByteArray(Charsets.US_ASCII)).put("fmt ".toByteArray(Charsets.US_ASCII))
+            .putInt(16).putShort(1).putShort(1).putInt(sampleRate).putInt(sampleRate * 2)
+            .putShort(2).putShort(16).put("data".toByteArray(Charsets.US_ASCII)).putInt(pcm.size)
+            .put(pcm).array()
 
     private fun json(s: String): String = buildString(s.length + 2) {
         append('"')

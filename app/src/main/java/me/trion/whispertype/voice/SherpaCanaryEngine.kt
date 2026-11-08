@@ -8,8 +8,10 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 /**
  * CPU greedy decoder for sherpa-onnx NeMo Canary exports.
  *
- * Canary is a non-autoregressive TDT model, so there is no Whisper-style token
- * cap and no padding. [language] is the forced output language; punctuation and
+ * Canary is an encoder-decoder model that also translates: srcLang is the
+ * spoken language and tgtLang the written one. Transcription needs both set
+ * to the same [language]; sherpa defaults srcLang to "en", which turns
+ * Spanish speech into a translation of misheard English. Punctuation and
  * casing come from the model (usePnc), so the text is only trimmed here.
  */
 class SherpaCanaryEngine(
@@ -23,12 +25,7 @@ class SherpaCanaryEngine(
         assetManager = null,
         config = OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
-                canary = OfflineCanaryModelConfig(
-                    encoder = encoderPath,
-                    decoder = decoderPath,
-                    tgtLang = language,
-                    usePnc = true,
-                ),
+                canary = canaryConfig(encoderPath, decoderPath, language),
                 tokens = tokensPath,
                 numThreads = numThreads,
                 provider = "cpu",
@@ -41,7 +38,7 @@ class SherpaCanaryEngine(
     override fun transcribe(samples: FloatArray, sampleRate: Int): String {
         val stream = recognizer.createStream()
         try {
-            stream.acceptWaveform(samples, sampleRate)
+            stream.acceptWaveform(padToMinimum(samples, sampleRate), sampleRate)
             recognizer.decode(stream)
             return recognizer.getResult(stream).text.trim()
         } finally {
@@ -51,5 +48,27 @@ class SherpaCanaryEngine(
 
     override fun release() {
         recognizer.release()
+    }
+
+    companion object {
+        internal fun canaryConfig(encoderPath: String, decoderPath: String, language: String) =
+            OfflineCanaryModelConfig(
+                encoder = encoderPath,
+                decoder = decoderPath,
+                srcLang = language,
+                tgtLang = language,
+                usePnc = true,
+            )
+
+        /**
+         * NVIDIA evaluates Canary with clips under one second zero-padded
+         * symmetrically to one second (model card); do the same.
+         */
+        internal fun padToMinimum(samples: FloatArray, sampleRate: Int): FloatArray {
+            if (samples.size >= sampleRate) return samples
+            val padded = FloatArray(sampleRate)
+            samples.copyInto(padded, (sampleRate - samples.size) / 2)
+            return padded
+        }
     }
 }

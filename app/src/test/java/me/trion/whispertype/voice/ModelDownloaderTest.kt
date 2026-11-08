@@ -34,7 +34,7 @@ class ModelDownloaderTest {
 
     @Test
     fun `multilingual legacy migration round trips the auto language code`() {
-        val spec = ModelCatalog.byId("base")!!
+        val spec = ModelCatalog.byId("small")!!
         val dir = File(models, spec.id).apply { mkdirs() }
         spec.layout.requiredPaths.forEach { File(dir, it).apply { parentFile?.mkdirs(); writeText(it) } }
 

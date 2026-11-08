@@ -76,19 +76,23 @@ data class ModelSpec(
 
 const val MIN_SEGMENT_MS = 5_000L
 const val MAX_SEGMENT_MS = 60_000L
+const val CANARY_MAX_SEGMENT_MS = 30_000L
 
 fun defaultMaxSegmentMs(layout: ModelLayout): Long = when (layout) {
     is ModelLayout.Whisper -> 28_000L
     // CTC has no Whisper frame cap; 45 seconds bounds decoder memory and latency.
     is ModelLayout.NemoCtc -> 45_000L
-    // Non-autoregressive Canary has no frame cap either; the bench decoded 27.6 s in one pass.
-    is ModelLayout.Canary -> 45_000L
+    // NVIDIA: Canary models are designed for input under 40 seconds.
+    is ModelLayout.Canary -> CANARY_MAX_SEGMENT_MS
 }
 
 fun validateMaxSegmentMs(value: Long, layout: ModelLayout): Long {
     require(value in MIN_SEGMENT_MS..MAX_SEGMENT_MS) { "maxSegmentMs must be between $MIN_SEGMENT_MS and $MAX_SEGMENT_MS" }
     if (layout is ModelLayout.Whisper) require(value <= 28_000L) {
         "Whisper maxSegmentMs must not exceed 28000"
+    }
+    if (layout is ModelLayout.Canary) require(value < 40_000L) {
+        "Canary maxSegmentMs must stay under 40000"
     }
     return value
 }
@@ -104,13 +108,9 @@ data class ResolvedModel(
 interface AsrEngine {
     fun transcribe(samples: FloatArray, sampleRate: Int = 16000): String
     fun release()
+
 }
 
-internal fun formatTranscript(text: String): String {
-    val trimmed = text.trim()
-    return if (trimmed.length >= 2 && trimmed[0].isLowerCase()) {
-        trimmed.replaceFirstChar { it.uppercaseChar() }
-    } else {
-        trimmed
-    }
-}
+// Letter case is left as the model wrote it; the keyboard's auto
+// capitalization setting decides whether to change it.
+internal fun formatTranscript(text: String): String = text.trim()

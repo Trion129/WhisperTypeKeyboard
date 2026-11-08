@@ -1,6 +1,7 @@
 package me.trion.whispertype.voice
 
 object AsrEngineFactory {
+
     fun create(model: ResolvedModel, requestedLanguage: String, numThreads: Int = 2): AsrEngine {
         val language = model.spec.languagePolicy.effectiveLanguage(requestedLanguage)
         return when (val layout = model.spec.layout) {

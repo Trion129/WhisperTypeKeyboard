@@ -59,6 +59,18 @@ class TypingRulesTest {
     }
 
     @Test
+    fun `dictation gets a capital at sentence start when the model gave none`() {
+        val n = FieldVariation.NORMAL
+        assertEquals("It was fun", TypingRules.matchDictationCase("it was fun", "I went home. ", n))
+        assertEquals("École", TypingRules.matchDictationCase("école", "", n))
+        assertEquals("A dog ran", TypingRules.matchDictationCase("a dog ran", "list\n", n))
+        assertEquals("iPhone works", TypingRules.matchDictationCase("iPhone works", "", n))
+        assertEquals("नमस्ते", TypingRules.matchDictationCase("नमस्ते", "", n))
+        assertEquals("park today", TypingRules.matchDictationCase("park today", "I went to the ", n))
+        assertEquals("in time", TypingRules.matchDictationCase("in time", "", FieldVariation.EMAIL))
+    }
+
+    @Test
     fun `dictation keeps deliberate capitals`() {
         val n = FieldVariation.NORMAL
         assertEquals("I think so", TypingRules.matchDictationCase("I think so", "and ", n))
