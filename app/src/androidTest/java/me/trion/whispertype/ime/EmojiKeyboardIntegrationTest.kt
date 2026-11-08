@@ -32,7 +32,8 @@ class EmojiKeyboardIntegrationTest {
 
     @Before
     fun resetImeAndField() {
-        executeImeCommand("ime reset")
+        // No "ime reset": it restarts Gboard without waiting, and on a slow
+        // emulator Gboard can attach after the "ime set" below and keep the field.
         executeImeCommand("ime enable $IME_COMPONENT")
         executeImeCommand("ime set $IME_COMPONENT")
 

@@ -40,9 +40,15 @@ jobs:
           fi
 
       - name: Grant Gradle wrapper permission
-        run: chmod +x gradlew
+        run: chmod +x gradlew .github/scripts/ime-tests.sh
 
-      - uses: reactivecircus/android-emulator-runner@v2
+      # The CI emulator sometimes fails at boot, before our keyboard can show.
+      # Up to 3 tries, each on a newly booted emulator. The logs of a failed
+      # try are uploaded at once, so they can be read while the next try runs.
+      - name: IME tests, try 1
+        id: try1
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           target: google_apis
@@ -51,18 +57,61 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
           emulator-boot-timeout: 1200
           disable-animations: true
-          script: './gradlew :app:connectedDebugAndroidTest --no-daemon || { s=$?; mkdir -p emulator-failure; adb -s emulator-5554 logcat -d > emulator-failure/emulator-5554-logcat.txt || true; exit "$s"; }'
+          script: .github/scripts/ime-tests.sh 1
 
-      - name: Upload integration reports
-        if: always()
+      - name: Upload logs of try 1
+        if: steps.try1.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: emoji-integration-reports
-          path: |
-            app/build/reports/androidTests/connected/
-            app/build/outputs/androidTest-results/connected/
-            emulator-failure/
-          if-no-files-found: ignore
+          name: ime-reports-try-1
+          path: ime-reports/try-1/
+          if-no-files-found: warn
+
+      - name: IME tests, try 2
+        id: try2
+        if: steps.try1.outcome == 'failure'
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
+          emulator-boot-timeout: 1200
+          disable-animations: true
+          script: .github/scripts/ime-tests.sh 2
+
+      - name: Upload logs of try 2
+        if: steps.try2.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ime-reports-try-2
+          path: ime-reports/try-2/
+          if-no-files-found: warn
+
+      # No continue-on-error: if this last try fails, the job fails.
+      - name: IME tests, try 3
+        id: try3
+        if: steps.try2.outcome == 'failure'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
+          emulator-boot-timeout: 1200
+          disable-animations: true
+          script: .github/scripts/ime-tests.sh 3
+
+      - name: Upload logs of try 3
+        if: always() && steps.try3.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ime-reports-try-3
+          path: ime-reports/try-3/
+          if-no-files-found: warn
 
   build:
     needs: instrumented
