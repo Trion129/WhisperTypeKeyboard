@@ -47,12 +47,21 @@ class EmojiKeyboardIntegrationTest {
         // `ime set` returns before the new IME is bound; a show request sent
         // before then is dropped, so repeat it until the keyboard appears.
         val deadline = SystemClock.uptimeMillis() + IME_TIMEOUT_MS
+        var rebindAt = SystemClock.uptimeMillis() + REBIND_AFTER_MS
         while (!device.hasObject(By.res(APP_PACKAGE, "keyboard_root"))) {
-            if (SystemClock.uptimeMillis() >= deadline) {
+            val now = SystemClock.uptimeMillis()
+            if (now >= deadline) {
                 throw AssertionError(
                     "WhisperType IME did not appear after resetting, enabling, selecting, " +
                         "and focusing the test field after ${IME_TIMEOUT_MS}ms",
                 )
+            }
+            // A cold CI emulator can drop the first "ime set" bind; select the
+            // keyboard again instead of only asking for it to show.
+            if (now >= rebindAt) {
+                executeImeCommand("ime enable $IME_COMPONENT")
+                executeImeCommand("ime set $IME_COMPONENT")
+                rebindAt = now + REBIND_AFTER_MS
             }
             requestKeyboard()
             device.wait(Until.hasObject(By.res(APP_PACKAGE, "keyboard_root")), SHOW_RETRY_MS)
@@ -386,7 +395,8 @@ class EmojiKeyboardIntegrationTest {
         const val FEATURE_TIMEOUT_MS = 3_000L
         const val UI_TIMEOUT_MS = 5_000L
         const val SUGGESTION_TIMEOUT_MS = 2_000L
-        const val IME_TIMEOUT_MS = 10_000L
+        const val IME_TIMEOUT_MS = 30_000L
         const val SHOW_RETRY_MS = 2_000L
+        const val REBIND_AFTER_MS = 5_000L
     }
 }
