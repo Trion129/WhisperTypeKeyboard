@@ -11,7 +11,7 @@ sherpa-onnx bundles a copy of ONNX Runtime for its native inference:
   Copyright (c) Microsoft Corporation
   Licensed under the MIT License
 
-The Whisper models (tiny/base/small, English and multilingual int8) are
+The Whisper models (tiny/base/small English and small multilingual, int8) are
 downloaded on demand from the official Hugging Face packs:
   https://huggingface.co/csukuangfj/sherpa-onnx-whisper-{id}
   OpenAI Whisper weights are licensed under the MIT License
@@ -30,6 +30,21 @@ NVIDIA Parakeet TDT CTC 110M English weights are licensed under CC-BY-4.0:
   INT8 distribution mirror by VocaHQ:
   https://huggingface.co/VocaHQ/sherpa-onnx-nemo-parakeet-tdt-ctc-110m-en-int8
   WhisperType uses the pinned CTC graph, not the TDT decoder.
+
+NVIDIA Canary 180M Flash weights are licensed under CC-BY-4.0:
+  https://huggingface.co/nvidia/canary-180m-flash
+  https://creativecommons.org/licenses/by/4.0/
+  sherpa-onnx INT8 export by csukuangfj:
+  https://huggingface.co/csukuangfj/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8
+  WhisperType uses the INT8 encoder/decoder export unmodified, for
+  transcription only (source and target language are the same).
+
+AI4Bharat IndicConformer Hindi weights are licensed under the MIT License:
+  https://huggingface.co/ai4bharat/indicconformer_stt_hi_hybrid_ctc_rnnt_large
+  Copyright (c) AI4Bharat
+  ONNX export distributed by ParisMita Global Solutions:
+  https://huggingface.co/parismitaglobalsolutions/indicconformer-sherpa-onnx
+  WhisperType uses the pinned INT8 NeMo CTC graph, not the RNNT decoder.
 
 Silero VAD v4 is bundled as app/src/main/assets/vad/silero_vad.onnx and is
 loaded by sherpa-onnx at run time to find speech pauses:
