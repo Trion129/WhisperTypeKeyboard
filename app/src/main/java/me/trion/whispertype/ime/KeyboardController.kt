@@ -215,10 +215,13 @@ class KeyboardController(
             if (mode == KeyboardLayout.Mode.EMOJI || panel == Panel.EMOJI) View.GONE else View.VISIBLE
 
         val mapped: List<List<KeyDef>> = listOf(emptyList<KeyDef>()) + layout
+        // Ask the app for the text once, not once per key: each ask is a
+        // blocking call that the app answers on its UI thread.
+        val uppercase = shouldUppercase()
         rows.forEachIndexed { index, row ->
             row.removeAllViews()
             val keys = mapped.getOrNull(index) ?: return@forEachIndexed
-            keys.forEach { key -> row.addView(createKeyView(key)) }
+            keys.forEach { key -> row.addView(createKeyView(key, uppercase)) }
         }
         when (panel) {
             Panel.EMOJI -> showEmojiPanel()
@@ -232,12 +235,13 @@ class KeyboardController(
     }
 
     private fun refreshKeyLabels() {
+        val uppercase = shouldUppercase()
         rows.forEach { row ->
             for (i in 0 until row.childCount) {
                 val child = row.getChildAt(i)
                 val key = child.tag as? KeyDef ?: continue
                 when (child) {
-                    is Button -> child.text = displayLabel(key)
+                    is Button -> child.text = displayLabel(key, uppercase)
                     is ImageButton -> if (key.type == KeyType.SHIFT) {
                         child.alpha = if (shiftState == ShiftState.OFF) 0.7f else 1f
                     }
@@ -246,7 +250,7 @@ class KeyboardController(
         }
     }
 
-    private fun createKeyView(key: KeyDef): View {
+    private fun createKeyView(key: KeyDef, uppercase: Boolean): View {
         val density = context.resources.displayMetrics.density
         val emojiSearchActive = isEmojiSearchActive()
         val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, key.weight)
@@ -274,7 +278,7 @@ class KeyboardController(
             }
         } else {
             Button(context).apply {
-                text = displayLabel(key)
+                text = displayLabel(key, uppercase)
                 isAllCaps = false
                 textSize = when (key.type) {
                     KeyType.SPACE -> 14f
@@ -320,7 +324,7 @@ class KeyboardController(
             KeyType.MIC -> view.setOnClickListener { onMicTapped() }
             KeyType.SPACE -> if (emojiSearchActive) bindPressKey(view, key) else bindSpace(view, key)
             else -> {
-                val popups = resolvedPopups(key)
+                val popups = resolvedPopups(key, uppercase)
                 if (popups.isNotEmpty()) {
                     bindKeyWithPopup(view, key, popups)
                 } else {
@@ -331,10 +335,10 @@ class KeyboardController(
         return view
     }
 
-    private fun resolvedPopups(key: KeyDef): List<String> {
+    private fun resolvedPopups(key: KeyDef, uppercase: Boolean = shouldUppercase()): List<String> {
         if (isEmojiSearchActive()) return emptyList()
         if (key.popupLabels.isNotEmpty()) {
-            return if (shouldUppercase() && key.type == KeyType.CHAR) {
+            return if (uppercase && key.type == KeyType.CHAR) {
                 KeyPopupCatalog.popupsFor(key.label, uppercase = true)
             } else {
                 key.popupLabels
@@ -343,9 +347,9 @@ class KeyboardController(
         return emptyList()
     }
 
-    private fun displayLabel(key: KeyDef): String {
+    private fun displayLabel(key: KeyDef, uppercase: Boolean): String {
         return when (key.type) {
-            KeyType.CHAR -> if (shouldUppercase()) key.shiftLabel.ifEmpty { key.label.uppercase() } else key.label
+            KeyType.CHAR -> if (uppercase) key.shiftLabel.ifEmpty { key.label.uppercase() } else key.label
             KeyType.SPACE -> "space"
             KeyType.SHIFT -> when (shiftState) {
                 ShiftState.LOCKED -> "⇪"
