@@ -1,0 +1,2 @@
+1.6.1: Bug fix.
+- Fix: typing lagged in some apps, such as Instagram. Each key press now asks the app for its text once, not once per key.
